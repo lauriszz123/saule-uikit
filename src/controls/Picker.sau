@@ -1,0 +1,188 @@
+import * from shine
+import * from core.Geometry
+import * from core.Color
+import * from core.TextStyle
+import * from core.ThemeData
+import * from core.Input
+import * from framework.Framework
+import * from Theme
+import * from animation.Animation
+import * from controls.Support
+import * from gestures.Gesture
+import * from layout.Stacks
+import * from painting.Icon
+import * from painting.Paint
+import * from overlays.Barrier
+import * from overlays.Menu
+
+-- ============================================================================
+-- Picker
+-- ============================================================================
+--
+-- Opens its list as an overlay entry, so it escapes any scroll view or panel
+-- it happens to sit in.
+
+-- ----------------------------------------------------------------------------
+-- Picker
+-- ----------------------------------------------------------------------------
+
+-- A closed box that opens a menu of options — the control the overlay makes
+-- possible.
+--
+--     Picker(
+--         value: country,
+--         options: {"Lithuania", "Latvia", "Estonia"},
+--         onChanged: fn(next: string)
+--             country = next
+--         end
+--     )
+--
+-- `onChanged` is `fn(value: string)`. The menu is an overlay entry, so it
+-- escapes any scroll view or panel the dropdown happens to sit in.
+export class Picker extends View
+	value: string
+	options: table<string>
+	placeholder: string
+	onChanged: (fn(string) -> nil)?
+	enabled: boolean
+	autofocus: boolean
+	width: float?
+
+	fn init(
+		value: string = "",
+		options: table<string> = {},
+		placeholder: string = "Select…",
+		onChanged: (fn(string) -> nil)? = nil,
+		enabled: boolean = true,
+		autofocus: boolean = false,
+		width: float? = nil,
+		key: string? = nil
+	)
+		self.super(key)
+
+		self.value = value
+		self.options = options
+		self.placeholder = placeholder
+		self.onChanged = onChanged
+		self.enabled = enabled
+		self.autofocus = autofocus
+		self.width = width
+	end
+
+	-- Open the menu directly under the closed box, matched to its width.
+	local fn open(context: BuildContext) -> nil
+		local items: table<MenuItem> = {}
+
+		for option: string in self.options do
+			local picked: string = option
+
+			items[#items + 1] = MenuItem(
+				option,
+				fn()
+					local changed: (fn(string) -> nil)? = self.onChanged
+
+					if changed != nil then
+						changed(picked)
+					end
+				end
+			)
+		end
+
+		local size: Size = context.size()
+		local origin: Offset = absoluteOf(context.element())
+
+		-- Kept, so `unmounted` can close it.
+		context.data().scratch.menu = showMenu(
+			context,
+			origin.dx,
+			origin.dy + size.height + 4.0,
+			items: items,
+			width: size.width
+		)
+	end
+
+	-- The open list is a layer at the root, not a child of this view, so it
+	-- survives this element being unmounted — a route popping, or the screen
+	-- switching underneath it. Nothing else would ever close it.
+	fn unmounted(el: Element) -> nil
+		local open: OverlayHandle? = el.data.scratch.menu as OverlayHandle
+
+		if open != nil then
+			open!.close()
+			el.data.scratch.menu = nil
+		end
+	end
+
+	fn tick(el: Element, dt: float) -> nil
+		if not self.enabled then
+			return
+		end
+
+		if motionOn(el.data.scratch, "focus", el.data.focused, 0.14).step(dt) then
+			el.markNeedsBuild()
+		end
+	end
+
+	fn body(context: BuildContext) -> View
+		local theme: ThemeData = Theme.of(context)
+		local scratch: ElementData = context.data()
+		local node: FocusNode = nodeFor(scratch)
+		local focused: boolean = scratch.focused == true
+
+		local label: string = self.value
+		local style: TextStyle = theme.body
+
+		if #label == 0 then
+			label = self.placeholder
+			style = theme.caption
+		end
+
+		local edge: Color = theme.border.lerp(
+			theme.primary,
+			motionOn(scratch.scratch, "focus", focused, 0.14).value
+		)
+
+		local box: View = Box(
+			width: self.width,
+			color: theme.surface,
+			border: edge,
+			radius: theme.radius,
+			padding: EdgeInsets.symmetric(horizontal: 10.0, vertical: 8.0),
+			child: HStack() do
+				Text(label, style: style, softWrap: false, maxLines: 1).expanded()
+				Icon(Icons.expandMore, 18.0, theme.textMuted)
+			end
+		)
+
+		if not self.enabled then
+			return box
+		end
+
+		return Focus(
+			child: GestureArea(
+				child: box,
+				onTap: fn()
+					self.open(context)
+				end,
+				onTapDown: fn()
+					node.requestFocus()
+				end
+			),
+			node: node,
+			autofocus: self.autofocus,
+			onKeyDown: fn(event: KeyEvent)
+				if not isActivator(event) and event.key != "down" then
+					return false
+				end
+
+				self.open(context)
+
+				return true
+			end,
+			onFocusChange: fn(gained: boolean)
+				scratch.focused = gained
+				context.markNeedsBuild()
+			end
+		)
+	end
+end

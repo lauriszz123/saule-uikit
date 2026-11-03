@@ -1,0 +1,36 @@
+-- ============================================================================
+-- Stack parent data
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- Parent data
+-- ----------------------------------------------------------------------------
+
+-- What a `Positioned` tells its enclosing `ZStack`. This is Flutter's
+-- `ParentData`, narrowed to the one case that needs it. It lives here rather
+-- than next to `ZStack` so the base `View` can declare the hook that returns
+-- it without importing the layout views back.
+export class ZStackData
+	left: float?
+	top: float?
+	right: float?
+	bottom: float?
+	width: float?
+	height: float?
+
+	fn init(
+		left: float? = nil,
+		top: float? = nil,
+		right: float? = nil,
+		bottom: float? = nil,
+		width: float? = nil,
+		height: float? = nil
+	)
+		self.left = left
+		self.top = top
+		self.right = right
+		self.bottom = bottom
+		self.width = width
+		self.height = height
+	end
+end

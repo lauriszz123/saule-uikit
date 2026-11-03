@@ -1,0 +1,183 @@
+import * from shine
+import * from core.Geometry
+import * from core.Color
+import * from core.TextStyle
+import * from core.ThemeData
+import * from core.Input
+import * from framework.Framework
+import * from Theme
+import * from animation.Animation
+import * from core.Tween
+
+-- ============================================================================
+-- Scroll position
+-- ============================================================================
+--
+-- The only mutable part of scrolling. Pass one in to read or drive the
+-- position; otherwise the view keeps its own in element scratch, where it
+-- survives rebuilds.
+
+-- ============================================================================
+-- Scrolling
+-- ============================================================================
+--
+-- A scroll view is three things stacked up: an unbounded constraint on the
+-- scroll axis so the child can be as long as it likes, a clip at the viewport
+-- edge, and a negative offset on the child. The wheel adjusts the offset; the
+-- rest falls out of the layout system.
+
+export enum ScrollAxis
+	Vertical,
+	Horizontal
+end
+
+-- Where a scroll view is scrolled to, and the only mutable part of scrolling.
+--
+-- Hold one yourself when you need to read or drive the position (jump to top,
+-- sync two views); otherwise let `ScrollView` keep its own in
+-- element scratch.
+export class ScrollController
+	-- Pixels scrolled from the start. Always in `0 .. maxOffset`.
+	offset: float
+
+	-- Where the offset is heading. The same as `offset` unless a glide is
+	-- running, and what a wheel notch moves — so three quick notches add up
+	-- instead of each one restarting from wherever the last had eased to.
+	target: float
+
+	-- Set by the last layout: how far this view *can* scroll.
+	maxOffset: float
+
+	local dirty: boolean
+	local glide: Tracker
+
+	fn init(offset: float = 0.0)
+		self.offset = offset
+		self.target = offset
+		self.maxOffset = 0.0
+		self.dirty = false
+		self.glide = Tracker(value: offset, duration: 0.18, easing: EasingTypes.OutCubic)
+	end
+
+	fn jumpTo(offset: float) -> nil
+		self.setOffset(offset)
+	end
+
+	fn scrollBy(delta: float) -> nil
+		self.setOffset(self.offset + delta)
+	end
+
+	-- Wheel scrolling: move the *target* and let `settle` catch the offset up.
+	--
+	-- Dragging a scrollbar goes through `setOffset` instead, which snaps —
+	-- easing towards a thumb the pointer is already holding is just lag.
+	fn glideBy(delta: float) -> boolean
+		local aim: float = atLeastZero(atMost(self.target + delta, self.maxOffset))
+
+		if aim == self.target then
+			return false
+		end
+
+		self.target = aim
+		self.glide.target(aim)
+		self.dirty = true
+
+		return true
+	end
+
+	-- Advance a running glide. True when the offset moved, which is the signal
+	-- the scroll view uses to lay itself out again.
+	fn settle(dt: float) -> boolean
+		if not self.glide.step(dt) then
+			return false
+		end
+
+		self.offset = atLeastZero(atMost(self.glide.current, self.maxOffset))
+		self.dirty = true
+
+		return true
+	end
+
+	-- Clamp into range and report whether anything actually moved — that is
+	-- what a scroll view returns to the pointer system to say "I used the
+	-- wheel", so a view already at its end lets the parent scroll instead.
+	fn setOffset(offset: float) -> boolean
+		local clamped: float = atLeastZero(atMost(offset, self.maxOffset))
+
+		if clamped == self.offset then
+			-- Still cancel a glide heading somewhere else: a drag that lands on
+			-- the offset a wheel notch was already easing towards must stop it,
+			-- or the view keeps moving under a stationary thumb.
+			self.target = clamped
+			self.glide.snap(clamped)
+
+			return false
+		end
+
+		self.offset = clamped
+		self.target = clamped
+		self.glide.snap(clamped)
+		self.dirty = true
+
+		return true
+	end
+
+	-- Called by layout once the content size is known. Re-clamps, because the
+	-- content may have shrunk since the last frame.
+	fn setExtent(maxOffset: float) -> nil
+		self.maxOffset = atLeastZero(maxOffset)
+		self.offset = atLeastZero(atMost(self.offset, self.maxOffset))
+
+		-- A glide aimed past the new end would keep pulling the offset back
+		-- out of range, so it is re-aimed rather than left running.
+		local capped: float = atLeastZero(atMost(self.target, self.maxOffset))
+
+		if capped != self.target then
+			self.target = capped
+			self.glide.snap(self.offset)
+		end
+	end
+
+	fn atStart() -> boolean
+		return self.offset <= 0.0
+	end
+
+	fn atEnd() -> boolean
+		return self.offset >= self.maxOffset
+	end
+
+	-- Fraction of the way down, 0 to 1. Zero when there is nothing to scroll.
+	fn progress() -> float
+		if self.maxOffset <= 0.0 then
+			return 0.0
+		end
+
+		return self.offset / self.maxOffset
+	end
+
+	fn takeDirty() -> boolean
+		local was: boolean = self.dirty
+		self.dirty = false
+
+		return was
+	end
+end
+
+-- The controller a scroll view keeps on its element, mirroring `nodeFor`.
+--
+-- A controller is this view's own state rather than anything the framework
+-- knows about, so it lives in the untyped `scratch` — which means the one `as`
+-- that recovers it belongs here, not at each of the call sites. A slot holding
+-- anything else is replaced rather than crashed on.
+export fn controllerFor(data: ElementData) -> ScrollController
+	local existing: ScrollController? = data.scratch.controller as ScrollController
+
+	if existing != nil then
+		return existing!
+	end
+
+	local made: ScrollController = ScrollController()
+	data.scratch.controller = made
+
+	return made
+end

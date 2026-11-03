@@ -1,0 +1,157 @@
+import * from shine
+import * from core.Color
+import * from core.TextStyle
+import * from core.ThemeData
+import * from core.Input
+import * from framework.Framework
+import * from gestures.Gesture
+import * from layout.Stacks
+import * from painting.Paint
+import * from Theme
+
+-- ============================================================================
+-- The activatable control
+-- ============================================================================
+--
+-- Every control in this kit that is "a visual you can click, focus, and
+-- operate with Enter or Space" was the same forty lines: read the theme, take
+-- the element's scratch, make a focus node, build the visual from the hover
+-- and focus flags, optionally pair it with a label, bail out early when
+-- disabled, then wrap the lot in a `Focus` around a `GestureArea`.
+--
+-- That shape appeared ten times across `Checkbox`, `Radio`, `Toggle`,
+-- `Button`, `IconButton` and the date field, and `Checkbox` and `Radio`
+-- differed from each other in six lines out of sixty-four. Every fix to the
+-- hover edge cases or the focus bookkeeping had to be made ten times, and the
+-- places it was *not* made are exactly where the three remaining
+-- inconsistencies live.
+--
+-- So the scaffold lives here once, and a control supplies only what makes it
+-- that control: a visual, and what activating it does.
+--
+--     Activatable(
+--         label: self.label,
+--         enabled: self.enabled,
+--         autofocus: self.autofocus,
+--         onActivate: fn() self.toggle() end
+--     ) do (hovered: boolean, focused: boolean, theme: ThemeData)
+--         return CheckMark(checked: self.value, hovered: hovered, focused: focused, theme: theme)
+--     end
+--
+-- `visual` is a trailing block, so it reads as the body of the control.
+export class Activatable extends View
+	local label: string
+	local enabled: boolean
+	local autofocus: boolean
+
+	-- Whether a hover is tracked at all. A `Toggle` draws no hover state, and
+	-- tracking one would cost it a rebuild per pointer crossing for nothing.
+	local tracksHover: boolean
+
+	-- Whether the label drops to `theme.caption` while disabled. `Checkbox`
+	-- and `Radio` do this; `Toggle` never has. Kept as a flag rather than
+	-- unified, because unifying it would change what a disabled `Toggle`
+	-- looks like and nothing here tests that.
+	local dimLabel: boolean
+
+	local onActivate: fn() -> nil
+	local visual: fn(boolean, boolean, ThemeData) -> View
+
+	fn init(
+		label: string = "",
+		enabled: boolean = true,
+		autofocus: boolean = false,
+		tracksHover: boolean = true,
+		dimLabel: boolean = true,
+		onActivate: fn() -> nil = () => nil,
+		key: string? = nil,
+		visual: fn(boolean, boolean, ThemeData) -> View = (hovered: boolean, focused: boolean, theme: ThemeData) => Text("")
+	)
+		self.super(key)
+
+		self.label = label
+		self.enabled = enabled
+		self.autofocus = autofocus
+		self.tracksHover = tracksHover
+		self.dimLabel = dimLabel
+		self.onActivate = onActivate
+		self.visual = visual
+	end
+
+	fn body(context: BuildContext) -> View
+		local theme: ThemeData = Theme.of(context)
+		local scratch: ElementData = context.data()
+		local node: FocusNode = nodeFor(scratch)
+
+		-- Bound to a local before the call: the checker does not infer a
+		-- return type through a call on a function-typed *field*, which is
+		-- why every callback in this kit is read into a local first.
+		local build: fn(boolean, boolean, ThemeData) -> View = self.visual
+		local activate: fn() -> nil = self.onActivate
+
+		local content: View = build(
+			scratch.hovered == true,
+			scratch.focused == true,
+			theme
+		)
+
+		local row: View = content
+
+		if #self.label > 0 then
+			local style: TextStyle = theme.body
+
+			if self.dimLabel and not self.enabled then
+				style = theme.caption
+			end
+
+			row = HStack(
+				sizing: StackSize.Fit,
+				spacing: 8.0,
+				children: {content, Text(self.label, style: style)}
+			)
+		end
+
+		-- A disabled control is not focusable, so it drops out of the Tab
+		-- order rather than being a stop that does nothing.
+		if not self.enabled then
+			return row
+		end
+
+		local hover: (fn(boolean) -> nil)? = nil
+
+		if self.tracksHover then
+			hover = fn(inside: boolean)
+				scratch.hovered = inside
+				context.markNeedsBuild()
+			end
+		end
+
+		return Focus(
+			child: GestureArea(
+				child: row,
+				onTap: fn()
+					activate()
+				end,
+				onTapDown: fn()
+					node.requestFocus()
+				end,
+				onHover: hover
+			),
+			node: node,
+			autofocus: self.autofocus,
+			onKeyDown: fn(event: KeyEvent)
+				if not isActivator(event) then
+					return false
+				end
+
+				activate()
+
+				return true
+			end,
+			onFocusChange: fn(gained: boolean)
+				scratch.focused = gained
+				context.markNeedsBuild()
+			end
+		)
+	end
+end

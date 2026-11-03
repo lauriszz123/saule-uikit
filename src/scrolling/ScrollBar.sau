@@ -1,0 +1,278 @@
+import * from shine
+import * from core.Geometry
+import * from core.Color
+import * from core.TextStyle
+import * from core.ThemeData
+import * from core.Input
+import * from framework.Framework
+import * from Theme
+import * from animation.Animation
+import * from core.Tween
+import * from framework.Diagnostics
+import * from scrolling.Controller
+
+-- ============================================================================
+-- Scrollbar
+-- ============================================================================
+--
+-- Claims presses only inside the strip along the edge, so the rest of the
+-- view still gets its clicks, and draws nothing when the content fits.
+
+-- The scrollbar drawn over a scroll view: drag the thumb, click the track to
+-- page, hover to fatten it. It paints nothing and takes no input when the
+-- content fits.
+--
+-- It covers the whole viewport so it can sit on top of the content, but only
+-- *claims* presses inside the bar strip along the edge — otherwise it would eat
+-- every click meant for the list underneath.
+export class ScrollBar extends View
+	controller: ScrollController
+	axis: ScrollAxis
+	color: Color?
+	thumbColor: Color?
+	thickness: float
+
+	-- How wide the grabbable strip is, as opposed to the drawn thumb.
+	grabWidth: float
+
+	fn init(
+		controller: ScrollController,
+		axis: ScrollAxis = ScrollAxis.Vertical,
+		color: Color? = nil,
+		thumbColor: Color? = nil,
+		thickness: float = 4.0,
+		grabWidth: float = 14.0,
+		key: string? = nil
+	)
+		self.super(key)
+
+		self.controller = controller
+		self.axis = axis
+		self.color = color
+		self.thumbColor = thumbColor
+		self.thickness = thickness
+		self.grabWidth = grabWidth
+	end
+
+	fn layout(el: Element, constraints: Constraints) -> Size
+		return constraints.biggest()
+	end
+
+	-- --- geometry ------------------------------------------------------------
+	--
+	-- One place computes the thumb, and paint and input both read it — so what
+	-- you see is exactly what you can grab.
+
+	local fn vertical() -> boolean
+		return self.axis == ScrollAxis.Vertical
+	end
+
+	-- Length of the viewport along the scroll axis.
+	local fn extent(el: Element) -> float
+		if self.vertical() then
+			return el.size.height
+		end
+
+		return el.size.width
+	end
+
+	-- Thumb length: the visible fraction of the content, with a floor so it
+	-- stays grabbable on very long content.
+	local fn thumbLength(el: Element) -> float
+		local viewport: float = self.extent(el)
+		local content: float = viewport + self.controller.maxOffset
+
+		if content <= 0.0 then
+			return viewport
+		end
+
+		return atLeast(viewport * viewport / content, 24.0)
+	end
+
+	local fn travel(el: Element) -> float
+		return atLeastZero(self.extent(el) - self.thumbLength(el))
+	end
+
+	local fn thumbStart(el: Element) -> float
+		return self.travel(el) * self.controller.progress()
+	end
+
+	-- Whether a local point is inside the strip along the bar's edge.
+	local fn inStrip(el: Element, x: float, y: float) -> boolean
+		if self.vertical() then
+			return x >= el.size.width - self.grabWidth and x <= el.size.width
+		end
+
+		return y >= el.size.height - self.grabWidth and y <= el.size.height
+	end
+
+	local fn alongOf(x: float, y: float) -> float
+		if self.vertical() then
+			return y
+		end
+
+		return x
+	end
+
+	-- --- input ---------------------------------------------------------------
+
+	fn handleEvent(el: Element, event: PointerEvent, x: float, y: float, inside: boolean) -> boolean
+		if self.controller.maxOffset <= 0.0 then
+			return false
+		end
+
+		if event.kind == PointerKind.Move then
+			if el.data.dragging then
+				-- Dragging continues even once the pointer wanders off the bar.
+				self.dragTo(el, self.alongOf(x, y))
+
+				return false
+			end
+
+			local over: boolean = inside and self.inStrip(el, x, y)
+
+			if over != el.data.hovered then
+				el.data.hovered = over
+
+				-- Nothing else on this frame is dirty — the pointer moving does
+				-- not by itself repaint anything — so the bar has to ask, or it
+				-- keeps drawing at its old width until something unrelated
+				-- happens to trigger a frame.
+				Repaint.request()
+			end
+
+			return false
+		end
+
+		if event.kind == PointerKind.Up then
+			if el.data.dragging then
+				Repaint.request()
+			end
+
+			el.data.dragging = false
+
+			return false
+		end
+
+		if event.kind != PointerKind.Down then
+			return false
+		end
+
+		if not inside or not self.inStrip(el, x, y) then
+			return false
+		end
+
+		local along: float = self.alongOf(x, y)
+		local start: float = self.thumbStart(el)
+		local length: float = self.thumbLength(el)
+
+		if along >= start and along <= start + length then
+			-- Grabbed the thumb: remember where, so it doesn't jump.
+			el.data.dragging = true
+			el.data.scratch.grab = along - start
+
+			Repaint.request()
+
+			-- Clicked the track: page toward the click.
+		else
+			local page: float = self.extent(el)
+
+			-- Glided, not jumped: a page is a long way to move, and landing
+			-- somewhere new without seeing the travel loses your place.
+			if along < start then
+				self.controller.glideBy(-page)
+			else
+				self.controller.glideBy(page)
+			end
+
+			-- Moving the offset changes where the viewport puts its child, and
+			-- nothing rebuilt, so the cached layout has to be thrown away.
+			el.markNeedsLayout()
+		end
+
+		return true
+	end
+
+	local fn dragTo(el: Element, along: float) -> nil
+		local travel: float = self.travel(el)
+
+		if travel <= 0.0 then
+			return
+		end
+
+		local grab: float = el.data.scratch.grab as float ?? 0.0
+
+		local fraction: float = atLeastZero(atMost((along - grab) / travel, 1.0))
+		self.controller.jumpTo(fraction * self.controller.maxOffset)
+		el.markNeedsLayout()
+	end
+
+	-- --- paint ---------------------------------------------------------------
+
+	-- Whether the bar is in use, as a 0..1 value. Both `tick` and `paint` go
+	-- through here so they can never disagree about the width being drawn.
+	local fn activeMotion(el: Element) -> AnimationController
+		return motionOn(
+			el.data.scratch,
+			"active",
+			el.data.hovered or el.data.dragging,
+			0.13,
+			EasingTypes.OutCubic
+		)
+	end
+
+	fn tick(el: Element, dt: float) -> nil
+		if self.controller.maxOffset <= 0.0 then
+			return
+		end
+
+		if self.activeMotion(el).step(dt) then
+			Repaint.request()
+		end
+	end
+
+	fn paint(el: Element, x: float, y: float) -> nil
+		if self.controller.maxOffset <= 0.0 then
+			return
+		end
+
+		-- The bar grows and brightens on the same value, so a pointer arriving
+		-- at the edge is met by the bar coming to meet it.
+		local active: float = self.activeMotion(el).value
+		local thickness: float = self.thickness + 3.0 * active
+
+		local thumb: Color = self.thumbColor ?? Colors.border.lerp(Colors.textMuted, active)
+
+		local length: float = self.thumbLength(el)
+		local along: float = self.thumbStart(el)
+
+		-- The track only shows while the bar is in use, so it stays quiet.
+		local rail: Color? = self.color
+
+		if rail == nil and active > 0.0 then
+			rail = Colors.surface.withAlpha(active)
+		end
+
+		if self.vertical() then
+			local left: float = x + el.size.width - thickness - 2.0
+
+			if rail != nil then
+				rail!.apply()
+				Graphics.rectangle("fill", left, y, thickness, el.size.height, 2.0, 2.0)
+			end
+
+			thumb.apply()
+			Graphics.rectangle("fill", left, y + along, thickness, length, 2.0, 2.0)
+		else
+			local top: float = y + el.size.height - thickness - 2.0
+
+			if rail != nil then
+				rail!.apply()
+				Graphics.rectangle("fill", x, top, el.size.width, thickness, 2.0, 2.0)
+			end
+
+			thumb.apply()
+			Graphics.rectangle("fill", x + along, top, length, thickness, 2.0, 2.0)
+		end
+	end
+end

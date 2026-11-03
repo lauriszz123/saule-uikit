@@ -1,0 +1,148 @@
+import * from shine
+import * from core.Geometry
+import * from core.Color
+import * from core.TextStyle
+import * from core.ThemeData
+import * from core.Input
+import * from framework.Framework
+import * from Theme
+
+-- ============================================================================
+-- Line mapping
+-- ============================================================================
+--
+-- Maps a caret offset to a line and column and back. Built on
+-- `TextStyle.wrapIndices`, which returns line *start indices* rather than
+-- strings: re-joined strings lose that correspondence the moment the text
+-- contains a double space.
+
+-- ============================================================================
+-- Multi-line editing
+-- ============================================================================
+--
+-- `TextField` edits one line; this edits many. The string operations are the
+-- same — `TextEngine` already does them — so everything here is about the
+-- second dimension: which visual line a caret index falls on, and which index a
+-- point on screen corresponds to.
+
+-- The line structure of a piece of text at a given width.
+--
+-- Built from `TextStyle.wrapIndices`, which returns *start indices*, so every
+-- mapping below is exact even when a break swallowed a space or the text
+-- contains runs of them.
+export class LineMap
+	local text: string
+	local starts: table<integer>
+	local style: TextStyle
+
+	fn init(text: string, style: TextStyle, maxWidth: float, softWrap: boolean = true)
+		self.text = text
+		self.style = style
+		self.starts = style.wrapIndices(text, maxWidth, softWrap)
+	end
+
+	fn count() -> integer
+		return #self.starts
+	end
+
+	-- 1-based index of the first character on `line`.
+	fn startOf(line: integer) -> integer
+		local clamped: integer = self.clampLine(line)
+
+		return self.starts[clamped]
+	end
+
+	-- Index one past the last character on `line`, not counting the newline.
+	fn endOf(line: integer) -> integer
+		local clamped: integer = self.clampLine(line)
+
+		if clamped >= #self.starts then
+			return String.len(self.text) + 1
+		end
+
+		local next: integer = self.starts[clamped + 1]
+
+		-- A hard break leaves the newline itself at the end of the line.
+		if String.sub(self.text, next - 1, next - 1) == "\n" then
+			return next - 1
+		end
+
+		return next
+	end
+
+	fn textOf(line: integer) -> string
+		return String.sub(self.text, self.startOf(line), self.endOf(line) - 1)
+	end
+
+	-- Which line a caret index sits on.
+	--
+	-- `starts` holds *character* positions while a caret index counts the
+	-- characters to its left, so the caret at the start of line `n` is
+	-- `starts[n] - 1`. Getting that boundary wrong puts the caret at the end of
+	-- the previous line the moment you press Enter.
+	fn lineAt(index: integer) -> integer
+		local line: integer = 1
+		local i: integer = 1
+
+		while i <= #self.starts do
+			if self.starts[i] - 1 <= index then
+				line = i
+			end
+
+			i = i + 1
+		end
+
+		return line
+	end
+
+	-- Characters from the start of the line to `index`.
+	fn columnAt(index: integer) -> integer
+		return index - self.startOf(self.lineAt(index)) + 1
+	end
+
+	-- The index at `column` on `line`, clamped to that line's length.
+	fn indexOf(line: integer, column: integer) -> integer
+		local start: integer = self.startOf(line)
+		local stop: integer = self.endOf(line)
+		local target: integer = start + column - 1
+
+		if target < start then
+			return start - 1
+		end
+
+		if target > stop - 1 then
+			return stop - 1
+		end
+
+		return target
+	end
+
+	-- Caret index for a point in the text's own coordinate space.
+	fn indexAtPoint(x: float, y: float) -> integer
+		local height: float = self.style.lineHeight()
+		local line: integer = self.clampLine(((y / height) as integer) + 1)
+		local within: integer = self.style.indexAt(self.textOf(line), x)
+
+		return self.startOf(line) + within - 1
+	end
+
+	-- Where the caret sits on screen, relative to the text's top-left.
+	fn pointAt(index: integer) -> Offset
+		local line: integer = self.lineAt(index)
+		local prefix: string = String.sub(self.text, self.startOf(line), index)
+
+		return Offset(self.style.measure(prefix).width, self.style.lineHeight() * ((line - 1) as float))
+	end
+
+	local fn clampLine(line: integer) -> integer
+		if line < 1 then
+			return 1
+		end
+
+		if line > #self.starts then
+			return #self.starts
+		end
+
+		return line
+	end
+end

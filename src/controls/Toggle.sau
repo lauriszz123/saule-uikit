@@ -1,0 +1,154 @@
+import * from shine
+import * from core.Geometry
+import * from core.Color
+import * from core.TextStyle
+import * from core.ThemeData
+import * from core.Input
+import * from framework.Framework
+import * from Theme
+import * from animation.Animation
+import * from controls.Activatable
+import * from core.Tween
+import * from framework.Diagnostics
+
+-- ============================================================================
+-- Toggle switch
+-- ============================================================================
+
+-- A sliding on/off switch. Same contract as `Checkbox`, different shape.
+export class Toggle extends View
+	value: boolean
+	label: string
+	onChanged: (fn(boolean) -> nil)?
+	enabled: boolean
+	autofocus: boolean
+
+	fn init(
+		value: boolean = false,
+		label: string = "",
+		onChanged: (fn(boolean) -> nil)? = nil,
+		enabled: boolean = true,
+		autofocus: boolean = false,
+		key: string? = nil
+	)
+		self.super(key)
+
+		self.value = value
+		self.label = label
+		self.onChanged = onChanged
+		self.enabled = enabled
+		self.autofocus = autofocus
+	end
+
+	local fn toggle() -> nil
+		local changed: (fn(boolean) -> nil)? = self.onChanged
+
+		if changed != nil and self.enabled then
+			changed(not self.value)
+		end
+	end
+
+	fn body(context: BuildContext) -> View
+		return Activatable(
+			label: self.label,
+			enabled: self.enabled,
+			autofocus: self.autofocus,
+			tracksHover: false,
+			dimLabel: false,
+			onActivate: fn()
+				self.toggle()
+			end
+		) do (hovered: boolean, focused: boolean, theme: ThemeData)
+			return ToggleTrack(
+				on: self.value,
+				enabled: self.enabled,
+				focused: focused,
+				theme: theme
+			)
+		end
+	end
+end
+
+export class ToggleTrack extends View
+	on: boolean
+	enabled: boolean
+	focused: boolean
+	theme: ThemeData
+
+	fn init(
+		on: boolean = false,
+		enabled: boolean = true,
+		focused: boolean = false,
+		theme: ThemeData? = nil,
+		key: string? = nil
+	)
+		self.super(key)
+
+		self.on = on
+		self.enabled = enabled
+		self.focused = focused
+		self.theme = theme ?? ThemeData()
+	end
+
+	fn layout(el: Element, constraints: Constraints) -> Size
+		return constraints.constrain(Size(38.0, 20.0))
+	end
+
+	-- The knob slides and the track fades between the two colours on the same
+	-- 0..1 value, which is the whole reason a switch is worth animating: the
+	-- travel is what tells you which way it was thrown.
+	fn tick(el: Element, dt: float) -> nil
+		local bag: table = el.data.scratch
+		local knob: AnimationController = motionOn(bag, "knob", self.on, 0.19, EasingTypes.InOutCubic)
+		local ring: AnimationController = motionOn(bag, "ring", self.focused, 0.12)
+
+		local moved: boolean = knob.step(dt)
+
+		if ring.step(dt) then
+			moved = true
+		end
+
+		if moved then
+			Repaint.request()
+		end
+	end
+
+	fn paint(el: Element, x: float, y: float) -> nil
+		local height: float = el.size.height
+		local radius: float = height / 2.0
+		local bag: table = el.data.scratch
+
+		local thrown: float = motionOn(bag, "knob", self.on, 0.19, EasingTypes.InOutCubic).value
+		local ringAt: float = motionOn(bag, "ring", self.focused, 0.12).value
+
+		local track: Color = self.theme.border.lerp(self.theme.primary, thrown)
+
+		if not self.enabled then
+			track = track.withAlpha(0.5)
+		end
+
+		track.apply()
+		Graphics.rectangle("fill", x, y, el.size.width, height, radius, radius)
+
+		local restX: float = x + radius
+		local throwX: float = x + el.size.width - radius
+		local knobX: float = restX + (throwX - restX) * thrown
+
+		self.theme.text.apply()
+		Graphics.circle("fill", knobX, y + radius, radius - 3.0)
+
+		if ringAt > 0.0 then
+			self.theme.text.withAlpha(ringAt).apply()
+			Graphics.setLineWidth(1.0)
+			Graphics.rectangle(
+				"line",
+				x - 3.0,
+				y - 3.0,
+				el.size.width + 6.0,
+				height + 6.0,
+				radius + 3.0,
+				radius + 3.0
+			)
+		end
+	end
+end

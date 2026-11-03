@@ -1,0 +1,343 @@
+import * from shine
+import * from core.Geometry
+import * from core.Color
+import * from core.TextStyle
+import * from core.ThemeData
+import * from core.Input
+import * from framework.Framework
+import * from Theme
+import * from animation.Animation
+import * from core.Tween
+import * from framework.Diagnostics
+import * from gestures.Gesture
+import * from layout.Boxes
+import * from layout.Stacks
+import * from painting.Paint
+
+-- ============================================================================
+-- Tabs
+-- ============================================================================
+--
+-- The strip is a single focus stop with the arrows moving between tabs, which
+-- is how a tab strip is meant to behave. `TabView` builds only the selected
+-- child, so an expensive pane costs nothing until you switch to it.
+
+-- ----------------------------------------------------------------------------
+-- TabView
+-- ----------------------------------------------------------------------------
+
+-- The strip of labels. One focus stop for the whole bar, with the arrows moving
+-- between tabs — which is how a tab strip is meant to behave, and why each tab
+-- is not separately focusable.
+export class TabBar extends View
+	tabs: table<string>
+	index: integer
+	onChanged: (fn(integer) -> nil)?
+	enabled: boolean
+	autofocus: boolean
+
+	fn init(
+		tabs: table<string> = {},
+		index: integer = 1,
+		onChanged: (fn(integer) -> nil)? = nil,
+		enabled: boolean = true,
+		autofocus: boolean = false,
+		key: string? = nil
+	)
+		self.super(key)
+
+		self.tabs = tabs
+		self.index = index
+		self.onChanged = onChanged
+		self.enabled = enabled
+		self.autofocus = autofocus
+	end
+
+	-- Clamp and report. Every path into a new tab goes through here.
+	local fn select(next: integer) -> nil
+		local changed: (fn(integer) -> nil)? = self.onChanged
+
+		if changed == nil or not self.enabled or #self.tabs == 0 then
+			return
+		end
+
+		local target: integer = next
+
+		if target < 1 then
+			target = #self.tabs
+		end
+
+		if target > #self.tabs then
+			target = 1
+		end
+
+		if target != self.index then
+			changed!(target)
+		end
+	end
+
+	fn body(context: BuildContext) -> View
+		local theme: ThemeData = Theme.of(context)
+		local scratch: ElementData = context.data()
+		local node: FocusNode = nodeFor(scratch)
+		local focused: boolean = scratch.focused == true
+
+		local labels: table<View> = {}
+		local i: integer = 1
+
+		while i <= #self.tabs do
+			local at: integer = i
+
+			labels[#labels + 1] = TabLabel(
+				label: self.tabs[i],
+				selected: i == self.index,
+				focused: focused and i == self.index,
+				theme: theme,
+				key: "tab" .. i,
+				onSelected: fn()
+					node.requestFocus()
+					self.select(at)
+				end
+			)
+
+			i = i + 1
+		end
+
+		local strip: View = HStack(sizing: StackSize.Fit, children: labels)
+
+		if not self.enabled then
+			return strip
+		end
+
+		return Focus(
+			child: strip,
+			node: node,
+			autofocus: self.autofocus,
+			onKeyDown: fn(event: KeyEvent)
+				if event.key == "left" then
+					self.select(self.index - 1)
+
+					return true
+				elseif event.key == "right" then
+					self.select(self.index + 1)
+
+					return true
+				elseif event.key == "home" then
+					self.select(1)
+
+					return true
+				elseif event.key == "end" then
+					self.select(#self.tabs)
+
+					return true
+				end
+
+				return false
+			end,
+			onFocusChange: fn(gained: boolean)
+				scratch.focused = gained
+				context.markNeedsBuild()
+			end
+		)
+	end
+end
+
+-- The bar under the selected tab. It wraps the label rather than sitting under
+-- it in a `VStack`, because it has to be exactly as wide as the label — and a
+-- childless box in a `VStack` lays out at zero width, which is why this used to
+-- draw nothing at all.
+--
+-- It animates itself: `tick` advances the controller and asks for a repaint, so
+-- moving the selection redraws two tabs and rebuilds neither.
+export class TabIndicator extends SingleChildView
+	active: boolean
+	color: Color
+	thickness: float
+
+	fn init(
+		active: boolean = false,
+		color: Color? = nil,
+		thickness: float = 2.0,
+		child: View? = nil,
+		key: string? = nil
+	)
+		self.super(child, key)
+
+		self.active = active
+		self.color = color ?? Colors.primary
+		self.thickness = thickness
+	end
+
+	fn layout(el: Element, constraints: Constraints) -> Size
+		local child: Element? = el.childAt(1)
+
+		if child == nil then
+			return constraints.constrain(Size(0.0, self.thickness))
+		end
+
+		local size: Size = child!.layout(constraints)
+		child!.offset = Offset.zero()
+
+		return constraints.constrain(Size(size.width, size.height + self.thickness))
+	end
+
+	fn tick(el: Element, dt: float) -> nil
+		local grow: AnimationController = motionOn(
+			el.data.scratch,
+			"grow",
+			self.active,
+			0.18,
+			EasingTypes.OutCubic
+		)
+
+		if grow.step(dt) then
+			Repaint.request()
+		end
+	end
+
+	fn paint(el: Element, x: float, y: float) -> nil
+		el.paintChildren(x, y)
+
+		local grown: float = motionOn(
+			el.data.scratch,
+			"grow",
+			self.active,
+			0.18,
+			EasingTypes.OutCubic
+		).value
+
+		if grown <= 0.0 then
+			return
+		end
+
+		-- Grows out of the middle, so the selection reads as landing on the tab
+		-- rather than the bar being switched on.
+		local width: float = el.size.width * grown
+		local left: float = x + (el.size.width - width) / 2.0
+
+		self.color.apply()
+		Graphics.rectangle("fill", left, y + el.size.height - self.thickness, width, self.thickness)
+	end
+end
+
+-- One tab: a label with an indicator under it.
+export class TabLabel extends View
+	label: string
+	selected: boolean
+	focused: boolean
+	theme: ThemeData
+	onSelected: (fn() -> nil)?
+
+	fn init(
+		label: string = "",
+		selected: boolean = false,
+		focused: boolean = false,
+		theme: ThemeData? = nil,
+		onSelected: (fn() -> nil)? = nil,
+		key: string? = nil
+	)
+		self.super(key)
+
+		self.label = label
+		self.selected = selected
+		self.focused = focused
+		self.theme = theme ?? ThemeData()
+		self.onSelected = onSelected
+	end
+
+	-- Only the label colour is rebuilt here; the indicator animates itself in
+	-- `TabIndicator.paint` without touching the build system.
+	fn tick(el: Element, dt: float) -> nil
+		local lit: boolean = self.selected or el.data.hovered == true
+
+		if motionOn(el.data.scratch, "ink", lit, 0.14).step(dt) then
+			el.markNeedsBuild()
+		end
+	end
+
+	fn body(context: BuildContext) -> View
+		local scratch: ElementData = context.data()
+		local hovered: boolean = scratch.hovered == true
+
+		local inkAt: float = motionOn(scratch.scratch, "ink", self.selected or hovered, 0.14).value
+		local ink: Color = self.theme.textMuted.lerp(self.theme.text, inkAt)
+
+		local bar: Color = self.theme.primary
+
+		if self.focused then
+			bar = self.theme.text
+		end
+
+		local content: View = TabIndicator(
+			active: self.selected or self.focused,
+			color: bar,
+			child: Text(self.label, style: TextStyle(color: ink)).padding(
+				insets: EdgeInsets.symmetric(horizontal: 14.0, vertical: 8.0)
+			)
+		)
+
+		return GestureArea(
+			child: content,
+			onTap: self.onSelected,
+			onHover: fn(inside: boolean)
+				scratch.hovered = inside
+				context.markNeedsBuild()
+			end
+		)
+	end
+end
+
+-- A tab strip with the matching panel under it.
+--
+--     TabView(
+--         tabs: {"Details", "History"},
+--         index: current,
+--         children: {detailsPane, historyPane},
+--         onChanged: fn(next: integer)
+--             current = next
+--         end
+--     )
+--
+-- Controlled, like every other control here: it renders the index you give it
+-- and reports the one that was picked. Only the selected child is built, so an
+-- expensive pane costs nothing until you switch to it.
+export class TabView extends View
+	tabs: table<string>
+	children: table<View>
+	index: integer
+	onChanged: (fn(integer) -> nil)?
+	autofocus: boolean
+
+	fn init(
+		tabs: table<string> = {},
+		children: table<View> = {},
+		index: integer = 1,
+		onChanged: (fn(integer) -> nil)? = nil,
+		autofocus: boolean = false,
+		key: string? = nil,
+		content: (fn() -> nil)? = nil
+	)
+		self.super(key)
+
+		self.tabs = tabs
+		self.children = childrenOf(children, content)
+		self.index = index
+		self.onChanged = onChanged
+		self.autofocus = autofocus
+	end
+
+	fn body(context: BuildContext) -> View
+		local theme: ThemeData = Theme.of(context)
+		local selected: View = Frame()
+
+		if self.index >= 1 and self.index <= #self.children then
+			selected = self.children[self.index]
+		end
+
+		return VStack(alignment: StackAlignment.Fill) do
+			TabBar(tabs: self.tabs, index: self.index, onChanged: self.onChanged, autofocus: self.autofocus)
+			Box(height: 1.0, color: theme.border)
+			selected.expanded()
+		end
+	end
+end

@@ -1,0 +1,208 @@
+import * from shine
+import * from core.Geometry
+import * from core.Color
+import * from core.TextStyle
+import * from core.ThemeData
+import * from core.Input
+import * from framework.Framework
+import * from Theme
+import * from animation.Animation
+import * from core.Tween
+import * from layout.Boxes
+import * from overlays.Manager
+
+-- ============================================================================
+-- Modal barrier and layer handles
+-- ============================================================================
+--
+-- Covering the window in paint is not the same as covering it for the
+-- pointer: the barrier swallows presses and the wheel, because scrolling the
+-- page under a modal is wrong.
+
+-- ============================================================================
+-- Things that float above the app
+-- ============================================================================
+--
+-- The framework provides the overlay itself (`OverlayRegistry`, `OverlayEntry`);
+-- this file is what you actually put in it — a barrier, and the three shapes
+-- that cover most of what an app needs: a dialog, a menu, and a tooltip.
+
+-- A full-window layer that swallows input.
+--
+-- Put one under a dialog and clicks can't reach the screen behind. `onDismiss`
+-- makes clicking outside close it, which is what a menu wants and a confirm
+-- dialog usually doesn't.
+export class ModalBarrier extends SingleChildView
+	color: Color?
+	onDismiss: (fn() -> nil)?
+
+	fn init(
+		child: View? = nil,
+		color: Color? = nil,
+		onDismiss: (fn() -> nil)? = nil,
+		key: string? = nil
+	)
+		self.super(child, key)
+
+		self.color = color
+		self.onDismiss = onDismiss
+	end
+
+	fn layout(el: Element, constraints: Constraints) -> Size
+		local size: Size = constraints.biggest()
+		local child: Element? = el.childAt(1)
+
+		if child != nil then
+			child!.layout(Constraints.tight(size))
+			child!.offset = Offset.zero()
+		end
+
+		return size
+	end
+
+	fn paint(el: Element, x: float, y: float) -> nil
+		local wash: Color? = self.color
+
+		if wash != nil then
+			wash!.apply()
+			Graphics.rectangle("fill", x, y, el.size.width, el.size.height)
+		end
+
+		el.paintChildren(x, y)
+	end
+
+	-- The barrier is behind the dialog in paint order, so the dialog's own
+	-- views get the press first; anything that reaches here landed outside.
+	fn handleEvent(el: Element, event: PointerEvent, x: float, y: float, inside: boolean) -> boolean
+		if not inside then
+			return false
+		end
+
+		if event.kind == PointerKind.Down then
+			local dismiss: (fn() -> nil)? = self.onDismiss
+
+			if dismiss != nil then
+				dismiss()
+			end
+
+			return true
+		end
+
+		-- Swallow the wheel too: scrolling the page under a modal is wrong.
+		return event.kind == PointerKind.Scroll
+	end
+end
+
+-- Everything below is built on this: insert an entry, get back a handle that
+-- closes it.
+--
+-- The handle is deliberately a plain class rather than a callback, so the code
+-- that opened a layer can close it from anywhere — a button inside it, a key
+-- handler outside it, or a timer.
+export class OverlayHandle
+	local overlay: OverlayRegistry
+	local entry: OverlayEntry
+	local closing: boolean
+	local motion: AnimationController
+
+	fn init(overlay: OverlayRegistry, entry: OverlayEntry)
+		self.overlay = overlay
+		self.entry = entry
+		self.closing = false
+		self.motion = AnimationController(duration: 0.16, easing: EasingTypes.OutCubic)
+	end
+
+	-- Remove the layer *now*, with no animation.
+	fn close() -> nil
+		self.overlay.remove(self.entry)
+	end
+
+	-- Ask the layer to animate out and take itself away once it has.
+	--
+	-- This is what a dismissal should call. `close` cannot animate anything,
+	-- because removing the entry destroys the very views that would have to
+	-- draw the exit — so the removal is deferred to `settle` instead, and until
+	-- then the layer is still mounted and still being ticked.
+	fn dismiss() -> nil
+		self.closing = true
+	end
+
+	fn isClosing() -> boolean
+		return self.closing
+	end
+
+	fn isOpen() -> boolean
+		return self.overlay.contains(self.entry)
+	end
+
+	-- How far open the layer is, 0 to 1. Everything in the layer reads its
+	-- opacity and its offset off this, including the barrier behind it.
+	fn progress() -> float
+		return self.motion.value
+	end
+
+	-- Advance the open/close animation by one frame, returning true when
+	-- something moved. `OverlayMotion` drives this; nothing else should.
+	fn settle(dt: float) -> boolean
+		self.motion.animate(not self.closing)
+
+		local moved: boolean = self.motion.step(dt)
+
+		-- Faded all the way out: now the entry can actually go.
+		if self.closing and not self.motion.isRunning() and self.motion.value <= 0.0 then
+			self.close()
+		end
+
+		return moved
+	end
+
+	-- Rebuild the layer's contents — call it after changing something the
+	-- builder closes over.
+	fn refresh() -> nil
+		self.overlay.markDirty()
+	end
+end
+
+-- Fades and lifts a layer in as it opens, and back out as it is dismissed.
+--
+--     OverlayMotion(handle: handle, rise: 14.0, child: dialogBox)
+--
+-- Every layer that wants an entrance puts one of these around its contents. It
+-- is also what drives the handle's clock, so a layer built without one will
+-- never finish a `dismiss` — put it inside the entry builder, always.
+--
+-- The `Padding` and `Opacity` are kept in the tree even when fully open, rather
+-- than being dropped once they stop doing anything: removing them would change
+-- the shape of the subtree and rebuild everything below, and a dialog holding a
+-- text field would lose its caret and its contents the moment it finished
+-- opening. `Opacity` already short-circuits at 1, so the cost of leaving it
+-- there is one comparison.
+export class OverlayMotion extends View
+	handle: OverlayHandle
+	child: View?
+	rise: float
+
+	fn init(handle: OverlayHandle, child: View? = nil, rise: float = 10.0, key: string? = nil)
+		self.super(key)
+
+		self.handle = handle
+		self.child = claimed(child)
+		self.rise = rise
+	end
+
+	-- The whole entry is rebuilt rather than just this element, because the
+	-- barrier's dim is decided above here and has to fade with everything else.
+	fn tick(el: Element, dt: float) -> nil
+		if self.handle.settle(dt) then
+			self.handle.refresh()
+		end
+	end
+
+	fn body(context: BuildContext) -> View
+		local shown: float = self.handle.progress()
+
+		return (self.child ?? Frame()).opacity(shown).padding(
+			insets: EdgeInsets.only(top: self.rise * (1.0 - shown))
+		)
+	end
+end

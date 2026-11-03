@@ -1,35 +1,95 @@
 -- Barrel: everything listed here becomes the public surface of `UIKit`.
--- Order follows the dependency chain — values, then the framework, then the
--- views built on top of it.
-import * from Assets
-import * from Geometry
-import * from Color
-import * from TextStyle
-import * from ThemeData
-import * from Events
-import * from Framework
-import * from Layout
-import * from Theme
-import * from Paint
-import * from Gesture
-import * from Tween
-import * from Animation
-import * from Overlay
-import * from Icon
-import * from Scroll
-import * from Canvas
-import * from Image
-import * from Button
-import * from Controls
-import * from Date
-import * from Shell
-import * from Data
-import * from TextField
-import * from TextEditor
+--
+-- One line per file, grouped by layer, in dependency order — values, then the
+-- framework, then the views built on top of it.
+--
+-- It has to be every file rather than one line per folder: re-export happens
+-- only in a barrel, and it does not *chain*. A nested `core/init.sau` that
+-- re-exports its folder is not itself re-exported by this file, so the names
+-- never reach a consumer — and `saule check` cannot see it, because the
+-- library type-checks either way. Only importing the package proves it.
+--
+-- Implementation files import each other by explicit path
+-- (`import * from core.Geometry`); nothing imports a folder. That keeps every
+-- file's dependencies readable at file granularity, which is what stops the
+-- layering below from quietly turning into a cycle.
 
--- Last: it names every view above to implement `View`'s modifiers, and
--- installs itself as it loads.
+-- Values. Nothing here knows the view tree exists.
+import * from core.Geometry
+import * from core.Color
+import * from core.TextStyle
+import * from core.ThemeData
+import * from core.Assets
+import * from core.Tween
+import * from core.Events
+import * from core.Input
+import * from core.ZStackData
+import * from core.Date
+
+-- The two-tree kernel, and the per-frame bookkeeping around it.
+import * from framework.Diagnostics
+import * from framework.Framework
+
+-- Layout.
+import * from layout.Boxes
+import * from layout.Stacks
+import * from layout.ZStack
+
+-- The ambient theme, read by every control below.
+import * from Theme
+
+-- Painting.
+import * from painting.Paint
+import * from painting.Canvas
+import * from painting.Image
+import * from painting.Icon
+
+-- Input and motion.
+import * from gestures.Gesture
+import * from animation.Animation
+
+-- Overlays. `Manager` installs the implementation the kernel calls through,
+-- so it comes before the layers built on it.
+import * from overlays.Manager
+import * from overlays.Barrier
+import * from overlays.Dialog
+import * from overlays.Menu
+import * from overlays.Tooltip
+import * from overlays.Toast
+
+-- Scrolling.
+import * from scrolling.Controller
+import * from scrolling.ScrollBar
+import * from scrolling.ScrollView
+
+-- Text: the engine and line mapping first, then the widgets over them.
+import * from text.LineMap
+import * from text.TextEngine
+import * from text.TextField
+import * from text.TextEditor
+
+-- Controls.
+import * from controls.Support
+import * from controls.Activatable
+import * from controls.Button
+import * from controls.Checkbox
+import * from controls.Radio
+import * from controls.Toggle
+import * from controls.Slider
+import * from controls.Progress
+import * from controls.Picker
+import * from controls.Tabs
+import * from controls.DateField
+
+-- Data views and page structure.
+import * from data.Grid
+import * from data.Table
+import * from shell.Shell
+
+-- Last before the entry point: it names every view above to implement
+-- `View`'s modifiers, and installs itself as it loads.
 import * from Modifiers
 
 -- The entry point sits on top of everything, `runApp` included.
-import * from App
+import * from app.Runtime
+import * from app.App

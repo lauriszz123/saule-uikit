@@ -1,0 +1,107 @@
+import * from shine
+import * from core.Geometry
+import * from core.Color
+import * from core.TextStyle
+import * from core.ThemeData
+import * from core.Input
+import * from framework.Framework
+import * from Theme
+import * from layout.Boxes
+import * from layout.Stacks
+
+-- ============================================================================
+-- Grid
+-- ============================================================================
+
+-- ============================================================================
+-- Grids and tables
+-- ============================================================================
+--
+-- Both are composed out of `HStack`, `VStack`, `Frame` and `Expand` rather
+-- than written as render views. That is not laziness: columns line up across
+-- rows *because* every row is built from the same width rules, so alignment is
+-- structural rather than something the layout has to keep in sync.
+
+-- A fixed-column grid.
+--
+--     Grid(columns: 3, spacing: 8.0, runSpacing: 8.0, children: cards)
+--
+-- Every cell gets an equal share of the width. `aspectRatio` fixes the cell
+-- height as a multiple of that width; leave it out and each row is as tall as
+-- its tallest child.
+--
+-- Every child is built up front — for a long grid, put it in a scroll view and
+-- keep the count in the hundreds.
+export class Grid extends View
+	children: table<View>
+	columns: integer
+	spacing: float
+	runSpacing: float
+	aspectRatio: float?
+
+	fn init(
+		children: table<View> = {},
+		columns: integer = 2,
+		spacing: float = 8.0,
+		runSpacing: float = 8.0,
+		aspectRatio: float? = nil,
+		key: string? = nil,
+		content: (fn() -> nil)? = nil
+	)
+		self.super(key)
+
+		self.children = childrenOf(children, content)
+		self.columns = columns
+		self.spacing = spacing
+		self.runSpacing = runSpacing
+		self.aspectRatio = aspectRatio
+	end
+
+	fn body(context: BuildContext) -> View
+		local perRow: integer = self.columns
+
+		if perRow < 1 then
+			perRow = 1
+		end
+
+		local rows: table<View> = {}
+		local index: integer = 1
+
+		while index <= #self.children do
+			local cells: table<View> = {}
+			local column: integer = 1
+
+			while column <= perRow do
+				local cell: View = Frame()
+
+				if index <= #self.children then
+					cell = self.children[index]
+				end
+
+				local sized: View = cell
+				local ratio: float? = self.aspectRatio
+
+				if ratio != nil then
+					sized = AspectRatio(ratio!, cell)
+				end
+
+				-- The trailing cells of a short last row are empty `Expand`s,
+				-- so the real ones keep their column width instead of stretching
+				-- to fill the gap.
+				cells[#cells + 1] = sized.expanded()
+
+				index = index + 1
+				column = column + 1
+			end
+
+			rows[#rows + 1] = HStack(alignment: StackAlignment.Fill, spacing: self.spacing, children: cells)
+		end
+
+		return VStack(
+			alignment: StackAlignment.Fill,
+			sizing: StackSize.Fit,
+			spacing: self.runSpacing,
+			children: rows
+		)
+	end
+end

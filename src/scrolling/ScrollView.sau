@@ -1,0 +1,284 @@
+import * from shine
+import * from core.Geometry
+import * from core.Color
+import * from core.TextStyle
+import * from core.ThemeData
+import * from core.Input
+import * from framework.Framework
+import * from Theme
+import * from gestures.Gesture
+import * from layout.Boxes
+import * from layout.Stacks
+import * from layout.ZStack
+import * from scrolling.Controller
+import * from scrolling.ScrollBar
+
+-- ============================================================================
+-- Scroll views
+-- ============================================================================
+--
+-- A view claims the wheel only when the offset actually moved, which is what
+-- makes a nested list hand scrolling back to its parent at either end.
+
+-- The viewport: clips to its own box and draws the child shifted by the
+-- controller's offset. `ScrollView` wraps this with the wheel
+-- handling; use it directly only if you are routing scrolling yourself.
+export class Viewport extends SingleChildView
+	axis: ScrollAxis
+	controller: ScrollController
+
+	fn init(
+		child: View? = nil,
+		axis: ScrollAxis = ScrollAxis.Vertical,
+		controller: ScrollController? = nil,
+		key: string? = nil
+	)
+		self.super(child, key)
+
+		self.axis = axis
+		self.controller = controller ?? ScrollController()
+	end
+
+	fn layout(el: Element, constraints: Constraints) -> Size
+		local vertical: boolean = self.axis == ScrollAxis.Vertical
+		local child: Element? = el.childAt(1)
+
+		-- The viewport itself fills what it is given; unbounded on the scroll
+		-- axis means "shrink-wrap", which is what a scroll view inside a column
+		-- of unknown height does.
+		local size: Size = constraints.biggest()
+
+		if child == nil then
+			return size
+		end
+
+		-- Unbound the scroll axis so the child reports its natural extent, and
+		-- keep the cross axis tight so content still fills the width.
+		local inner: Constraints = Constraints(constraints.minWidth, constraints.maxWidth, 0.0, Math.huge)
+
+		if not vertical then
+			inner = Constraints(0.0, Math.huge, constraints.minHeight, constraints.maxHeight)
+		end
+
+		local content: Size = child!.layout(inner)
+
+		if vertical then
+			self.controller.setExtent(content.height - size.height)
+			child!.offset = Offset(0.0, -self.controller.offset)
+		else
+			self.controller.setExtent(content.width - size.width)
+			child!.offset = Offset(-self.controller.offset, 0.0)
+		end
+
+		return size
+	end
+
+	fn paint(el: Element, x: float, y: float) -> nil
+		-- Clip at the viewport edge; the child is already offset out of view.
+		local sx: float, sy: float, sw: float, sh: float = Graphics.getScissor()
+
+		Graphics.intersectScissor(x, y, el.size.width, el.size.height)
+		el.paintChildren(x, y)
+		Graphics.setScissor(sx, sy, sw, sh)
+	end
+end
+
+-- A scrollable region.
+--
+--     ScrollView(child: VStack(children: manyRows))
+--
+-- The wheel scrolls it while the pointer is inside, and it only claims the
+-- wheel when it can actually move — so a list nested inside another one hands
+-- scrolling back to its parent once it hits an end, the way every real UI does.
+--
+-- Nothing about it is stateful from the outside: the offset lives in element
+-- scratch, so it survives rebuilds without a `State` object.
+export class ScrollView extends View
+	child: View?
+	axis: ScrollAxis
+	controller: ScrollController?
+
+	-- Pixels moved per wheel notch.
+	step: float
+
+	-- Draw a thin indicator when there is something to scroll.
+	showBar: boolean
+	barColor: Color?
+
+	fn init(
+		child: View? = nil,
+		axis: ScrollAxis = ScrollAxis.Vertical,
+		controller: ScrollController? = nil,
+		step: float = 48.0,
+		showBar: boolean = true,
+		barColor: Color? = nil,
+		key: string? = nil,
+		content: (fn() -> nil)? = nil
+	)
+		self.super(key)
+
+		self.child = childOf(child, content)
+		self.axis = axis
+		self.controller = controller
+		self.step = step
+		self.showBar = showBar
+		self.barColor = barColor
+	end
+
+	-- Carries a wheel glide forward, and picks up any other move the offset
+	-- made. The offset is read during layout, so the view has to be rebuilt for
+	-- a new one to show — which is why this marks itself dirty rather than
+	-- asking for a repaint.
+	fn tick(el: Element, dt: float) -> nil
+		local supplied: ScrollController? = self.controller
+		local controller: ScrollController = controllerFor(el.data)
+
+		if supplied != nil then
+			controller = supplied!
+		end
+
+		local moved: boolean = controller.settle(dt)
+
+		-- Dragging the scrollbar thumb, or a `jumpTo` from anywhere else, moves
+		-- the offset without going through the wheel handler. The scrollbar can
+		-- only invalidate *itself*, and it is a sibling of the viewport that
+		-- actually places the content — so marking its own layout dirty moved
+		-- nothing. Noticing the controller here is what makes a drag work.
+		if controller.takeDirty() then
+			moved = true
+		end
+
+		if moved then
+			el.markNeedsBuild()
+		end
+	end
+
+	fn body(context: BuildContext) -> View
+		local data: ElementData = context.data()
+
+		-- An explicit controller wins; otherwise keep one per element so the
+		-- position outlives every rebuild.
+		local supplied: ScrollController? = self.controller
+
+		local controller: ScrollController = controllerFor(data)
+
+		if supplied != nil then
+			controller = supplied!
+		end
+
+		local vertical: boolean = self.axis == ScrollAxis.Vertical
+
+		local viewport: View = Viewport(child: self.child, axis: self.axis, controller: controller)
+
+		if self.showBar then
+			viewport = ZStack(
+				children: {
+					viewport,
+					ScrollBar(controller: controller, axis: self.axis, thumbColor: self.barColor),
+				}
+			)
+		end
+
+		return GestureArea(
+			child: viewport,
+			onScroll: fn(dx: float, dy: float)
+				-- Wheel up is positive, and scrolling up means a smaller offset.
+				local delta: float = -dy
+
+				if not vertical then
+					delta = -dx
+
+					-- A horizontal view is usually driven by a vertical wheel,
+					-- so fall back to it when there is no sideways movement.
+					if delta == 0.0 then
+						delta = -dy
+					end
+				end
+
+				if delta == 0.0 then
+					return false
+				end
+
+				controller.glideBy(delta * self.step)
+
+				-- Only claim the wheel if the offset actually moved; at either
+				-- end, an enclosing scroll view should get it instead.
+				if controller.takeDirty() then
+					context.markNeedsBuild()
+
+					return true
+				end
+
+				return false
+			end
+		)
+	end
+end
+
+-- A scrolling list of children — `ScrollView` wrapped around a
+-- `VStack` (or `HStack`), which is the shape almost every list wants.
+--
+-- Every child is built up front, so this is for tens of rows, not thousands.
+export class List extends View
+	children: table<View>
+	axis: ScrollAxis
+	controller: ScrollController?
+	spacing: float
+	padding: EdgeInsets?
+	step: float
+	showBar: boolean
+
+	fn init(
+		children: table<View> = {},
+		axis: ScrollAxis = ScrollAxis.Vertical,
+		controller: ScrollController? = nil,
+		spacing: float = 0.0,
+		padding: EdgeInsets? = nil,
+		step: float = 48.0,
+		showBar: boolean = true,
+		key: string? = nil,
+		content: (fn() -> nil)? = nil
+	)
+		self.super(key)
+
+		self.children = childrenOf(children, content)
+		self.axis = axis
+		self.controller = controller
+		self.spacing = spacing
+		self.padding = padding
+		self.step = step
+		self.showBar = showBar
+	end
+
+	fn body(context: BuildContext) -> View
+		local content: View = VStack(
+			children: self.children,
+			alignment: StackAlignment.Fill,
+			sizing: StackSize.Fit,
+			spacing: self.spacing
+		)
+
+		if self.axis == ScrollAxis.Horizontal then
+			content = HStack(
+				children: self.children,
+				alignment: StackAlignment.Center,
+				sizing: StackSize.Fit,
+				spacing: self.spacing
+			)
+		end
+
+		local padding: EdgeInsets? = self.padding
+
+		if padding != nil then
+			content = content.padding(insets: padding)
+		end
+
+		return ScrollView(
+			child: content,
+			axis: self.axis,
+			controller: self.controller,
+			step: self.step,
+			showBar: self.showBar
+		)
+	end
+end

@@ -1,0 +1,152 @@
+import * from shine
+import * from core.Geometry
+import * from core.Color
+import * from core.TextStyle
+import * from core.ThemeData
+import * from core.Input
+import * from framework.Framework
+import * from Theme
+import * from animation.Animation
+import * from core.Tween
+import * from layout.Boxes
+import * from overlays.Barrier
+import * from painting.Paint
+import * from overlays.Manager
+
+-- ============================================================================
+-- Toasts
+-- ============================================================================
+--
+-- No barrier and nothing focusable, so whatever you were doing carries on
+-- underneath. Counts down on the frame clock rather than holding a `State`.
+
+-- ----------------------------------------------------------------------------
+-- Toasts
+-- ----------------------------------------------------------------------------
+
+-- A short message that appears near the bottom of the window and takes itself
+-- away.
+--
+--     showToast(context, "Saved")
+--
+-- It takes no input at all — no barrier, nothing focusable — so whatever the
+-- user was doing carries on underneath it.
+export fn showToast(
+	context: BuildContext,
+	message: string = "",
+	duration: float = 2.5,
+	color: Color? = nil
+) -> OverlayHandle?
+	local owner: BuildOwner? = context.owner()
+
+	if owner == nil then
+		return nil
+	end
+
+	local overlay: OverlayRegistry = owner!.overlay()
+	local entry: OverlayEntry = OverlayEntry() do
+		return Frame()
+	end
+
+	local handle: OverlayHandle = OverlayHandle(overlay, entry)
+
+	entry.builder = fn()
+		return ToastLayer(
+			message: message,
+			duration: duration,
+			color: color,
+			onDone: fn()
+				handle.close()
+			end
+		)
+	end
+
+	overlay.insert(entry)
+
+	return handle
+end
+
+-- The layer itself. It owns the countdown, using the per-frame `tick` hook —
+-- no `State`, and no rebuild until the moment it disappears.
+export class ToastLayer extends View
+	message: string
+	duration: float
+	color: Color?
+	onDone: (fn() -> nil)?
+
+	fn init(
+		message: string = "",
+		duration: float = 2.5,
+		color: Color? = nil,
+		onDone: (fn() -> nil)? = nil,
+		key: string? = nil
+	)
+		self.super(key)
+
+		self.message = message
+		self.duration = duration
+		self.color = color
+		self.onDone = onDone
+	end
+
+	-- How long the toast takes to arrive and to leave.
+	static local fadeTime: float = 0.22
+
+	fn tick(el: Element, dt: float) -> nil
+		local elapsed: float = el.data.scratch.elapsed as float ?? 0.0
+
+		elapsed = elapsed + dt
+		el.data.scratch.elapsed = elapsed
+
+		-- In on arrival, back out over the last moments of the countdown. The
+		-- controller is aimed at 1 or 0 depending on which side of that line
+		-- the clock is on, and turns itself around.
+		local leaving: boolean = elapsed >= self.duration - ToastLayer.fadeTime
+		local fade: AnimationController = motionIn(
+			el.data.scratch,
+			"fade",
+			ToastLayer.fadeTime,
+			EasingTypes.OutCubic
+		)
+
+		fade.animate(not leaving)
+
+		if fade.step(dt) then
+			el.markNeedsBuild()
+		end
+
+		if elapsed >= self.duration and el.data.scratch.done != true then
+			-- Guard against firing twice: closing removes the entry, but this
+			-- frame's tick has already been scheduled.
+			el.data.scratch.done = true
+
+			local done: (fn() -> nil)? = self.onDone
+			if done != nil then
+				done()
+			end
+		end
+	end
+
+	fn body(context: BuildContext) -> View
+		local theme: ThemeData = Theme.of(context)
+		local shown: float = motionIn(
+			context.data().scratch,
+			"fade",
+			ToastLayer.fadeTime,
+			EasingTypes.OutCubic
+		).value
+
+		-- `.opacity` sits on the box rather than on the alignment, so the canvas
+		-- it allocates is the size of the toast instead of the whole window.
+		-- Read the chain bottom-up and that ordering is right there in it.
+		return Box(
+			color: self.color ?? theme.surfaceLight,
+			border: theme.border,
+			radius: 6.0,
+			padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
+			child: Text(self.message, style: theme.body, softWrap: false, maxLines: 1)
+		).opacity(shown).padding(insets: EdgeInsets.only(bottom: 16.0 + 12.0 * shown)).aligned(
+			Alignment.bottomCenter()
+		)
+	end
+end

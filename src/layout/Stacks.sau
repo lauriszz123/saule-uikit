@@ -1,0 +1,580 @@
+import * from shine
+import * from core.Geometry
+import * from framework.Framework
+import * from layout.Boxes
+
+-- ============================================================================
+-- Flex layout
+-- ============================================================================
+--
+-- Everything that lays children out along an axis. `AxisStack` and
+-- `FlowStack` share the `mainOf` / `crossOf` swap below, which is why they
+-- stay in one file: splitting them would mean exporting those helpers, and
+-- an axis swap is not public API.
+
+-- ============================================================================
+-- Layout views
+-- ============================================================================
+--
+-- The primitives every other view is composed from. Each one implements the
+-- same contract: measure the children under constraints you derive, give each
+-- child an `offset` relative to your own top-left, and return your own size.
+
+-- Axis helpers. `main` is the direction a flex advances in, `cross` the
+-- perpendicular one; keeping the swap in one place is what lets `AxisStack` be
+-- written once for both directions.
+local fn mainOf(horizontal: boolean, size: Size) -> float
+	if horizontal then
+		return size.width
+	end
+
+	return size.height
+end
+
+local fn crossOf(horizontal: boolean, size: Size) -> float
+	if horizontal then
+		return size.height
+	end
+
+	return size.width
+end
+
+local fn flexChildConstraints(
+	horizontal: boolean,
+	mainMin: float,
+	mainMax: float,
+	crossMin: float,
+	crossMax: float
+) -> Constraints
+	if horizontal then
+		return Constraints(mainMin, mainMax, crossMin, crossMax)
+	end
+
+	return Constraints(crossMin, crossMax, mainMin, mainMax)
+end
+
+-- ----------------------------------------------------------------------------
+-- AxisStack: HStack and VStack
+-- ----------------------------------------------------------------------------
+
+export enum Axis
+	Horizontal,
+	Vertical
+end
+
+-- How the slack along the stack's own axis is shared out.
+export enum Distribution
+	Start,
+	End,
+	Center,
+	SpaceBetween,
+	SpaceAround,
+	SpaceEvenly
+end
+
+-- Where a child sits on the *other* axis. `Leading` is the left edge of a
+-- `VStack` and the top edge of an `HStack`, which is why these are named for
+-- the reading direction rather than for a compass point.
+export enum StackAlignment
+	Leading,
+	Trailing,
+	Center,
+
+	-- Stretch every child across the cross axis. Needs a bounded one; on an
+	-- unbounded axis this behaves like `Leading`.
+	Fill
+end
+
+export enum StackSize
+
+	-- Shrink-wrap the children.
+	Fit,
+
+	-- Take everything the parent allows.
+	Fill
+end
+
+-- Wrap a child so its `HStack` / `VStack` gives it a share of the leftover space
+-- instead of its natural size. Two `Expand`s with `flex: 1` and `flex: 2`
+-- split the remainder one-third / two-thirds.
+export class Expand extends SingleChildView
+	flex: integer
+
+	fn init(child: View? = nil, flex: integer = 1, key: string? = nil)
+		self.super(child, key)
+
+		self.flex = flex
+	end
+
+	fn flexFactor() -> integer
+		return self.flex
+	end
+end
+
+-- Flexible empty space — an `Expand` with nothing in it.
+export class Spacer extends View
+	flex: integer
+
+	fn init(flex: integer = 1, key: string? = nil)
+		self.super(key)
+
+		self.flex = flex
+	end
+
+	fn flexFactor() -> integer
+		return self.flex
+	end
+
+	fn layout(el: Element, constraints: Constraints) -> Size
+		return constraints.smallest()
+	end
+end
+
+-- Lay children out along one axis. `HStack` and `VStack` are the two directions;
+-- use those rather than `AxisStack` directly.
+export class AxisStack extends View
+	direction: Axis
+	children: table<View>
+	distribution: Distribution
+	alignment: StackAlignment
+	sizing: StackSize
+
+	-- Gap inserted between adjacent children, on top of any alignment spacing.
+	spacing: float
+
+	fn init(
+		direction: Axis,
+		children: table<View> = {},
+		distribution: Distribution = Distribution.Start,
+		alignment: StackAlignment = StackAlignment.Leading,
+		sizing: StackSize = StackSize.Fill,
+		spacing: float = 0.0,
+		key: string? = nil,
+		content: (fn() -> nil)? = nil
+	)
+		self.super(key)
+
+		self.direction = direction
+		self.children = childrenOf(children, content)
+		self.distribution = distribution
+		self.alignment = alignment
+		self.sizing = sizing
+		self.spacing = spacing
+	end
+
+	fn childViews() -> table<View>
+		return self.children
+	end
+
+	fn layout(el: Element, constraints: Constraints) -> Size
+		local horizontal: boolean = self.direction == Axis.Horizontal
+		local count: integer = el.childCount()
+
+		-- Cross-axis constraint every child sees. `Stretch` turns it tight, so
+		-- children fill the perpendicular axis instead of shrink-wrapping.
+		local crossMax: float = constraints.maxHeight
+		local mainMax: float = constraints.maxWidth
+
+		if not horizontal then
+			crossMax = constraints.maxWidth
+			mainMax = constraints.maxHeight
+		end
+
+		local crossMin: float = 0.0
+		if self.alignment == StackAlignment.Fill and crossMax < Math.huge then
+			crossMin = crossMax
+		end
+
+		local totalFlex: integer = 0
+		local usedMain: float = 0.0
+		local maxCross: float = 0.0
+
+		-- Pass 1: inflexible children take their natural size on the main axis.
+		for i: integer = 1, count do
+			local child: Element? = el.childAt(i)
+
+			if child != nil then
+				local flex: integer = child.view.flexFactor()
+
+				if flex > 0 then
+					totalFlex = totalFlex + flex
+				else
+					local size: Size = child.layout(
+						flexChildConstraints(horizontal, 0.0, Math.huge, crossMin, crossMax)
+					)
+
+					usedMain = usedMain + mainOf(horizontal, size)
+					maxCross = atLeast(maxCross, crossOf(horizontal, size))
+				end
+			end
+		end
+
+		if count > 1 then
+			usedMain = usedMain + self.spacing * ((count - 1) as float)
+		end
+
+		-- Pass 2: split whatever is left between the flexible children.
+		if totalFlex > 0 then
+			local free: float = 0.0
+
+			if mainMax < Math.huge then
+				free = atLeastZero(mainMax - usedMain)
+			end
+
+			for i: integer = 1, count do
+				local child: Element? = el.childAt(i)
+
+				if child != nil then
+					local flex: integer = child.view.flexFactor()
+
+					if flex > 0 then
+						local share: float = free * (flex as float) / (totalFlex as float)
+						local size: Size = child.layout(
+							flexChildConstraints(horizontal, share, share, crossMin, crossMax)
+						)
+
+						usedMain = usedMain + mainOf(horizontal, size)
+						maxCross = atLeast(maxCross, crossOf(horizontal, size))
+					end
+				end
+			end
+		end
+
+		-- Own size.
+		local mainExtent: float = usedMain
+
+		if self.sizing == StackSize.Fill and mainMax < Math.huge then
+			mainExtent = mainMax
+		end
+
+		local size: Size = constraints.constrain(Size(maxCross, mainExtent))
+
+		if horizontal then
+			size = constraints.constrain(Size(mainExtent, maxCross))
+		end
+
+		local finalMain: float = mainOf(horizontal, size)
+		local finalCross: float = crossOf(horizontal, size)
+
+		-- Distribute the slack according to the main-axis alignment.
+		local free: float = atLeastZero(finalMain - usedMain)
+		local leading: float = 0.0
+		local between: float = self.spacing
+
+		if self.distribution == Distribution.End then
+			leading = free
+		elseif self.distribution == Distribution.Center then
+			leading = free / 2.0
+		elseif self.distribution == Distribution.SpaceBetween then
+			if count > 1 then
+				between = between + free / ((count - 1) as float)
+			end
+		elseif self.distribution == Distribution.SpaceAround then
+			if count > 0 then
+				local unit: float = free / (count as float)
+				leading = unit / 2.0
+				between = between + unit
+			end
+		elseif self.distribution == Distribution.SpaceEvenly then
+			local unit: float = free / ((count + 1) as float)
+			leading = unit
+			between = between + unit
+		end
+
+		local cursor: float = leading
+
+		for i: integer = 1, count do
+			local child: Element? = el.childAt(i)
+
+			if child != nil then
+				local childMain: float = mainOf(horizontal, child.size)
+				local childCross: float = crossOf(horizontal, child.size)
+				local crossPos: float = 0.0
+
+				if self.alignment == StackAlignment.Trailing then
+					crossPos = finalCross - childCross
+				elseif self.alignment == StackAlignment.Center then
+					crossPos = (finalCross - childCross) / 2.0
+				end
+
+				if horizontal then
+					child.offset = Offset(cursor, crossPos)
+				else
+					child.offset = Offset(crossPos, cursor)
+				end
+
+				cursor = cursor + childMain + between
+			end
+		end
+
+		return size
+	end
+end
+
+-- Children left to right.
+--
+--     HStack(spacing: 8.0) do
+--         return {Text("Volume"), Slider(value: level).expanded()}
+--     end
+export class HStack extends AxisStack
+	fn init(
+		children: table<View> = {},
+		distribution: Distribution = Distribution.Start,
+		alignment: StackAlignment = StackAlignment.Center,
+		sizing: StackSize = StackSize.Fill,
+		spacing: float = 0.0,
+		key: string? = nil,
+		content: (fn() -> nil)? = nil
+	)
+		self.super(Axis.Horizontal, children, distribution, alignment, sizing, spacing, key, content)
+	end
+end
+
+-- Children top to bottom.
+--
+--     VStack(alignment: StackAlignment.Fill, spacing: 14.0) do
+--         return {header, list, footer}
+--     end
+export class VStack extends AxisStack
+	fn init(
+		children: table<View> = {},
+		distribution: Distribution = Distribution.Start,
+		alignment: StackAlignment = StackAlignment.Leading,
+		sizing: StackSize = StackSize.Fill,
+		spacing: float = 0.0,
+		key: string? = nil,
+		content: (fn() -> nil)? = nil
+	)
+		self.super(Axis.Vertical, children, distribution, alignment, sizing, spacing, key, content)
+	end
+end
+
+-- ----------------------------------------------------------------------------
+-- FlowStack
+-- ----------------------------------------------------------------------------
+
+-- A row that starts a new line when it runs out of width — tag lists, chips,
+-- toolbars, anything whose item count is not known in advance.
+--
+--     FlowStack(spacing: 8.0, runSpacing: 8.0, children: tags)
+--
+-- Unlike `HStack`, nothing here flexes: every child takes its natural size, and the
+-- layout decides where the breaks go.
+export class FlowStack extends View
+	children: table<View>
+	direction: Axis
+
+	-- Gap between children within a run, and between the runs themselves.
+	spacing: float
+	runSpacing: float
+
+	-- How a run's leftover space is distributed, and how children thinner than
+	-- their run are aligned across it.
+	distribution: Distribution
+	alignment: StackAlignment
+
+	fn init(
+		children: table<View> = {},
+		direction: Axis = Axis.Horizontal,
+		spacing: float = 0.0,
+		runSpacing: float = 0.0,
+		distribution: Distribution = Distribution.Start,
+		alignment: StackAlignment = StackAlignment.Leading,
+		key: string? = nil,
+		content: (fn() -> nil)? = nil
+	)
+		self.super(key)
+
+		self.children = childrenOf(children, content)
+		self.direction = direction
+		self.spacing = spacing
+		self.runSpacing = runSpacing
+		self.distribution = distribution
+		self.alignment = alignment
+	end
+
+	fn childViews() -> table<View>
+		return self.children
+	end
+
+	fn layout(el: Element, constraints: Constraints) -> Size
+		local horizontal: boolean = self.direction == Axis.Horizontal
+		local count: integer = el.childCount()
+		local mainLimit: float = constraints.maxHeight
+
+		if horizontal then
+			mainLimit = constraints.maxWidth
+		end
+
+		-- Measure everything first: a child's size decides which run it lands
+		-- in, so nothing can be positioned until all of them are known.
+		local loose: Constraints = constraints.loosen()
+		local i: integer = 1
+
+		while i <= count do
+			local child: Element? = el.childAt(i)
+
+			if child != nil then
+				child!.layout(loose)
+			end
+
+			i = i + 1
+		end
+
+		-- Assign runs. Each entry describes one line: where it starts, how many
+		-- children it holds, and how far it reaches on each axis.
+		local runStart: table<integer> = {}
+		local runCount: table<integer> = {}
+		local runMain: table<float> = {}
+		local runCross: table<float> = {}
+
+		local currentMain: float = 0.0
+		local currentCross: float = 0.0
+		local currentCount: integer = 0
+		local currentStart: integer = 1
+		local widest: float = 0.0
+
+		i = 1
+
+		while i <= count do
+			local child: Element? = el.childAt(i)
+
+			if child != nil then
+				local main: float = mainOf(horizontal, child!.size)
+				local cross: float = crossOf(horizontal, child!.size)
+				local candidate: float = main
+
+				if currentCount > 0 then
+					candidate = currentMain + self.spacing + main
+				end
+
+				if currentCount > 0 and candidate > mainLimit then
+					-- Close the run and start a new one with this child.
+					runStart[#runStart + 1] = currentStart
+					runCount[#runCount + 1] = currentCount
+					runMain[#runMain + 1] = currentMain
+					runCross[#runCross + 1] = currentCross
+
+					widest = atLeast(widest, currentMain)
+					currentStart = i
+					currentCount = 1
+					currentMain = main
+					currentCross = cross
+				else
+					currentCount = currentCount + 1
+					currentMain = candidate
+					currentCross = atLeast(currentCross, cross)
+				end
+			end
+
+			i = i + 1
+		end
+
+		if currentCount > 0 then
+			runStart[#runStart + 1] = currentStart
+			runCount[#runCount + 1] = currentCount
+			runMain[#runMain + 1] = currentMain
+			runCross[#runCross + 1] = currentCross
+			widest = atLeast(widest, currentMain)
+		end
+
+		-- Own size: as long as the longest run, as thick as the runs stacked up.
+		local totalCross: float = 0.0
+		local r: integer = 1
+
+		while r <= #runCross do
+			totalCross = totalCross + runCross[r]
+
+			if r > 1 then
+				totalCross = totalCross + self.runSpacing
+			end
+
+			r = r + 1
+		end
+
+		local size: Size = constraints.constrain(Size(totalCross, widest))
+
+		if horizontal then
+			size = constraints.constrain(Size(widest, totalCross))
+		end
+
+		self.place(el, horizontal, size, runStart, runCount, runMain, runCross)
+
+		return size
+	end
+
+	-- Second pass: walk the runs and give every child its offset.
+	local fn place(
+		el: Element,
+		horizontal: boolean,
+		size: Size,
+		runStart: table<integer>,
+		runCount: table<integer>,
+		runMain: table<float>,
+		runCross: table<float>
+	) -> nil
+		local finalMain: float = mainOf(horizontal, size)
+		local crossCursor: float = 0.0
+		local r: integer = 1
+
+		while r <= #runStart do
+			local free: float = atLeastZero(finalMain - runMain[r])
+			local leading: float = 0.0
+			local between: float = self.spacing
+			local count: integer = runCount[r]
+
+			if self.distribution == Distribution.End then
+				leading = free
+			elseif self.distribution == Distribution.Center then
+				leading = free / 2.0
+			elseif self.distribution == Distribution.SpaceBetween then
+				if count > 1 then
+					between = between + free / ((count - 1) as float)
+				end
+			elseif self.distribution == Distribution.SpaceAround then
+				if count > 0 then
+					local unit: float = free / (count as float)
+					leading = unit / 2.0
+					between = between + unit
+				end
+			elseif self.distribution == Distribution.SpaceEvenly then
+				local unit: float = free / ((count + 1) as float)
+				leading = unit
+				between = between + unit
+			end
+
+			local mainCursor: float = leading
+			local i: integer = runStart[r]
+			local last: integer = runStart[r] + count - 1
+
+			while i <= last do
+				local child: Element? = el.childAt(i)
+
+				if child != nil then
+					local childMain: float = mainOf(horizontal, child!.size)
+					local childCross: float = crossOf(horizontal, child!.size)
+					local crossPos: float = crossCursor
+
+					if self.alignment == StackAlignment.Trailing then
+						crossPos = crossCursor + runCross[r] - childCross
+					elseif self.alignment == StackAlignment.Center then
+						crossPos = crossCursor + (runCross[r] - childCross) / 2.0
+					end
+
+					if horizontal then
+						child!.offset = Offset(mainCursor, crossPos)
+					else
+						child!.offset = Offset(crossPos, mainCursor)
+					end
+
+					mainCursor = mainCursor + childMain + between
+				end
+
+				i = i + 1
+			end
+
+			crossCursor = crossCursor + runCross[r] + self.runSpacing
+			r = r + 1
+		end
+	end
+end

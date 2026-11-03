@@ -1,10 +1,11 @@
-import * from Geometry
-import * from Color
-import * from Framework
-import * from Layout
-import * from Paint
-import * from Gesture
-import * from Overlay
+import * from core.Geometry
+import * from core.Color
+import * from framework.Framework
+import * from painting.Paint
+import * from gestures.Gesture
+import * from layout.Boxes
+import * from layout.Stacks
+import * from overlays.Tooltip
 
 -- ============================================================================
 -- The modifier implementation
@@ -38,13 +39,7 @@ export class UIKitModifiers implements ViewModifiers
 	-- Straight to `Surface`, not through `Box`. Two reasons: it is one element
 	-- rather than a composite that builds one, and `Box.body` *is* this chain
 	-- written out — routing back through it would recurse forever.
-	fn background(
-		child: View,
-		color: Color?,
-		radius: float,
-		border: Color?,
-		borderWidth: float
-	) -> View
+	fn background(child: View, color: Color?, radius: float, border: Color?, borderWidth: float) -> View
 		return Surface(color, radius, border, borderWidth, child)
 	end
 
@@ -52,13 +47,7 @@ export class UIKitModifiers implements ViewModifiers
 		return Frame(width, height, child)
 	end
 
-	fn limits(
-		child: View,
-		minWidth: float?,
-		maxWidth: float?,
-		minHeight: float?,
-		maxHeight: float?
-	) -> View
+	fn limits(child: View, minWidth: float?, maxWidth: float?, minHeight: float?, maxHeight: float?) -> View
 		return FrameLimits(child, minWidth, maxWidth, minHeight, maxHeight)
 	end
 

@@ -1,0 +1,348 @@
+import * from shine
+import * from core.Geometry
+import * from core.Color
+import * from core.TextStyle
+import * from core.ThemeData
+import * from core.Input
+import * from framework.Framework
+import * from Theme
+import * from animation.Animation
+import * from framework.Diagnostics
+import * from gestures.Gesture
+import * from layout.Boxes
+
+-- ============================================================================
+-- Slider
+-- ============================================================================
+--
+-- Keeps the drag in element scratch and follows the pointer outside its own
+-- box, which is what separates a drag from a press.
+
+-- ----------------------------------------------------------------------------
+-- Slider
+-- ----------------------------------------------------------------------------
+
+-- A value between `min` and `max`, set by dragging, clicking, or the arrows.
+--
+--     Slider(
+--         value: volume,
+--         onChanged: fn(next: float)
+--             volume = next
+--         end
+--     )
+--
+-- `onChanged` is `fn(value: float)`. `step` snaps the value; leave it at 0 for
+-- continuous. Arrow keys move by `step` when set, or a hundredth of the range.
+export class Slider extends View
+	value: float
+	min: float
+	max: float
+	step: float
+	onChanged: (fn(float) -> nil)?
+	enabled: boolean
+	autofocus: boolean
+	width: float?
+
+	fn init(
+		value: float = 0.0,
+		min: float = 0.0,
+		max: float = 1.0,
+		step: float = 0.0,
+		onChanged: (fn(float) -> nil)? = nil,
+		enabled: boolean = true,
+		autofocus: boolean = false,
+		width: float? = nil,
+		key: string? = nil
+	)
+		self.super(key)
+
+		self.value = value
+		self.min = min
+		self.max = max
+		self.step = step
+		self.onChanged = onChanged
+		self.enabled = enabled
+		self.autofocus = autofocus
+		self.width = width
+	end
+
+	-- Snap and clamp, then report — the one place a new value is produced.
+	local fn emit(raw: float) -> nil
+		local changed: (fn(float) -> nil)? = self.onChanged
+
+		if changed == nil or not self.enabled then
+			return
+		end
+
+		local span: float = self.max - self.min
+
+		if span <= 0.0 then
+			return
+		end
+
+		local next: float = raw
+
+		if self.step > 0.0 then
+			local steps: float = (((raw - self.min) / self.step + 0.5) as integer) as float
+			next = self.min + steps * self.step
+		end
+
+		next = atLeast(atMost(next, self.max), self.min)
+
+		if next != self.value then
+			changed!(next)
+		end
+	end
+
+	fn body(context: BuildContext) -> View
+		local theme: ThemeData = Theme.of(context)
+		local scratch: ElementData = context.data()
+		local node: FocusNode = nodeFor(scratch)
+		local span: float = self.max - self.min
+		local fraction: float = 0.0
+
+		if span > 0.0 then
+			fraction = atLeastZero(atMost((self.value - self.min) / span, 1.0))
+		end
+
+		local track: View = SliderTrack(
+			fraction: fraction,
+			enabled: self.enabled,
+			focused: scratch.focused == true,
+			hovered: scratch.hovered == true,
+			theme: theme,
+			onSeek: fn(at: float)
+				-- The track reports where it was grabbed, in its own 0..1 space; the
+				-- view owns the arithmetic that turns that into a value.
+
+				self.emit(self.min + at * span)
+			end,
+			onPress: fn()
+				nodeFor(scratch).requestFocus()
+			end
+		)
+
+		local sized: View = track
+
+		if self.width != nil then
+			sized = Frame(width: self.width, child: track)
+		end
+
+		if not self.enabled then
+			return sized
+		end
+
+		local nudge: float = span / 100.0
+
+		if self.step > 0.0 then
+			nudge = self.step
+		end
+
+		return Focus(
+			child: sized,
+			node: node,
+			autofocus: self.autofocus,
+			onKeyDown: fn(event: KeyEvent)
+				if event.key == "left" or event.key == "down" then
+					self.emit(self.value - nudge)
+
+					return true
+				elseif event.key == "right" or event.key == "up" then
+					self.emit(self.value + nudge)
+
+					return true
+				elseif event.key == "home" then
+					self.emit(self.min)
+
+					return true
+				elseif event.key == "end" then
+					self.emit(self.max)
+
+					return true
+				end
+
+				return false
+			end,
+			onFocusChange: fn(gained: boolean)
+				scratch.focused = gained
+				context.markNeedsBuild()
+			end
+		)
+	end
+end
+
+-- The track and thumb. It handles its own pointer input rather than sitting in
+-- a `GestureArea`, because turning a click into a value needs the width —
+-- and only the render view knows that.
+export class SliderTrack extends View
+	fraction: float
+	enabled: boolean
+	focused: boolean
+	hovered: boolean
+	theme: ThemeData
+	onSeek: (fn(float) -> nil)?
+
+	-- The track consumes the press itself, so focusing on click has to happen
+	-- here rather than in an enclosing `GestureArea` that never sees it.
+	onPress: (fn() -> nil)?
+
+	fn init(
+		fraction: float = 0.0,
+		enabled: boolean = true,
+		focused: boolean = false,
+		hovered: boolean = false,
+		theme: ThemeData? = nil,
+		onSeek: (fn(float) -> nil)? = nil,
+		onPress: (fn() -> nil)? = nil,
+		key: string? = nil
+	)
+		self.super(key)
+
+		self.fraction = fraction
+		self.enabled = enabled
+		self.focused = focused
+		self.hovered = hovered
+		self.theme = theme ?? ThemeData()
+		self.onSeek = onSeek
+		self.onPress = onPress
+	end
+
+	fn layout(el: Element, constraints: Constraints) -> Size
+		local width: float = 160.0
+
+		if constraints.hasBoundedWidth() then
+			width = constraints.maxWidth
+		end
+
+		return constraints.constrain(Size(width, 22.0))
+	end
+
+	local fn seek(el: Element, x: float) -> nil
+		local usable: float = el.size.width - 16.0
+
+		if usable <= 0.0 then
+			return
+		end
+
+		local callback: (fn(float) -> nil)? = self.onSeek
+
+		if callback != nil then
+			callback!(atLeastZero(atMost((x - 8.0) / usable, 1.0)))
+		end
+	end
+
+	fn handleEvent(el: Element, event: PointerEvent, x: float, y: float, inside: boolean) -> boolean
+		if not self.enabled then
+			return false
+		end
+
+		if event.kind == PointerKind.Down then
+			if not inside then
+				return false
+			end
+
+			el.data.dragging = true
+
+			local press: (fn() -> nil)? = self.onPress
+			if press != nil then
+				press()
+			end
+
+			self.seek(el, x)
+
+			return true
+		end
+
+		if event.kind == PointerKind.Move then
+			-- Keep tracking after the pointer leaves: releasing a slider only
+			-- because the cursor drifted off it is maddening.
+			if el.data.dragging == true then
+				self.seek(el, x)
+			end
+
+			return false
+		end
+
+		if event.kind == PointerKind.Up then
+			el.data.dragging = false
+		end
+
+		return false
+	end
+
+	-- The fill follows the value, and the knob swells while the control is live.
+	--
+	-- The fill is a `Tracker` rather than a plain controller because the value
+	-- keeps moving: an arrow key pressed twice retargets mid-run, and easing
+	-- from wherever it got to is what keeps that smooth.
+	fn tick(el: Element, dt: float) -> nil
+		local bag: table = el.data.scratch
+		local swell: AnimationController = motionOn(bag, "swell", self.hovered or self.focused, 0.12)
+		local ring: AnimationController = motionOn(bag, "ring", self.focused, 0.12)
+		local fill: Tracker = self.fill(el)
+
+		local moved: boolean = fill.step(dt)
+
+		if swell.step(dt) then
+			moved = true
+		end
+
+		if ring.step(dt) then
+			moved = true
+		end
+
+		if moved then
+			Repaint.request()
+		end
+	end
+
+	-- Dragging is the one case that must not ease. The pointer sets the value
+	-- *after* this frame's tick, so the snap has to happen wherever the tracker
+	-- is read — which is here, on the way to both `tick` and `paint`.
+	local fn fill(el: Element) -> Tracker
+		local tracked: Tracker = trackerIn(el.data.scratch, "fill", self.fraction, 0.16)
+
+		if el.data.dragging == true then
+			tracked.snap(self.fraction)
+		end
+
+		return tracked
+	end
+
+	fn paint(el: Element, x: float, y: float) -> nil
+		local height: float = el.size.height
+		local middle: float = y + height / 2.0
+		local left: float = x + 8.0
+		local usable: float = el.size.width - 16.0
+		local bag: table = el.data.scratch
+
+		local filled: float = usable * self.fill(el).current
+		local swell: float = motionOn(bag, "swell", self.hovered or self.focused, 0.12).value
+		local ringAt: float = motionOn(bag, "ring", self.focused, 0.12).value
+
+		local rail: Color = self.theme.border
+		local accent: Color = self.theme.primary
+
+		if not self.enabled then
+			rail = rail.withAlpha(0.5)
+			accent = accent.withAlpha(0.5)
+		end
+
+		rail.apply()
+		Graphics.rectangle("fill", left, middle - 2.0, usable, 4.0, 2.0, 2.0)
+
+		accent.apply()
+		Graphics.rectangle("fill", left, middle - 2.0, filled, 4.0, 2.0, 2.0)
+
+		local knob: float = 7.0 + swell
+
+		accent.apply()
+		Graphics.circle("fill", left + filled, middle, knob)
+
+		if ringAt > 0.0 then
+			self.theme.text.withAlpha(ringAt).apply()
+			Graphics.setLineWidth(1.0)
+			Graphics.circle("line", left + filled, middle, knob + 3.0)
+		end
+	end
+end

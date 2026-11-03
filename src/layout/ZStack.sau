@@ -1,0 +1,170 @@
+import * from shine
+import * from core.Geometry
+import * from core.ZStackData
+import * from framework.Framework
+
+-- ============================================================================
+-- Overlap layout
+-- ============================================================================
+--
+-- `ZStack` stacks its children front to back; `Positioned` is the parent data
+-- that pins one of them to an edge. Needs none of the flex helpers.
+
+-- ----------------------------------------------------------------------------
+-- ZStack / Positioned
+-- ----------------------------------------------------------------------------
+
+-- Overlap children. Later children paint on top of earlier ones.
+--
+-- A child wrapped in `Positioned` is placed explicitly; everything else is
+-- sized loosely and placed by `alignment`. The stack takes the size of its
+-- largest non-positioned child, or fills its constraints when it has none.
+export class ZStack extends View
+	children: table<View>
+	alignment: Alignment
+
+	fn init(
+		children: table<View> = {},
+		alignment: Alignment? = nil,
+		key: string? = nil,
+		content: (fn() -> nil)? = nil
+	)
+		self.super(key)
+
+		self.children = childrenOf(children, content)
+		self.alignment = alignment ?? Alignment.topLeft()
+	end
+
+	fn childViews() -> table<View>
+		return self.children
+	end
+
+	fn layout(el: Element, constraints: Constraints) -> Size
+		local count: integer = el.childCount()
+		local loose: Constraints = constraints.loosen()
+		local hasFlow: boolean = false
+		local width: float = 0.0
+		local height: float = 0.0
+
+		-- Pass 1: the non-positioned children decide how big the stack is.
+		for i: integer = 1, count do
+			local child: Element? = el.childAt(i)
+
+			if child != nil then
+				local placement: ZStackData? = child.view.zStackData()
+
+				if placement == nil then
+					local size: Size = child.layout(loose)
+					hasFlow = true
+					width = atLeast(width, size.width)
+					height = atLeast(height, size.height)
+				end
+			end
+		end
+
+		local size: Size = constraints.biggest()
+
+		if hasFlow then
+			size = constraints.constrain(Size(width, height))
+		end
+
+		-- Pass 2: place everything now that the stack's own size is known.
+		for i: integer = 1, count do
+			local child: Element? = el.childAt(i)
+
+			if child != nil then
+				local placement: ZStackData? = child.view.zStackData()
+
+				if placement == nil then
+					child.offset = self.alignment.inscribe(child.size, size)
+				else
+					child.offset = self.place(child, placement, size)
+				end
+			end
+		end
+
+		return size
+	end
+
+	-- Resolve one `Positioned` child against the stack's box.
+	local fn place(child: Element, placement: ZStackData, size: Size) -> Offset
+		local left: float? = placement.left
+		local top: float? = placement.top
+		local right: float? = placement.right
+		local bottom: float? = placement.bottom
+
+		-- An explicit width, or the gap between opposing edges.
+		local width: float? = placement.width
+		if left != nil and right != nil then
+			width = atLeastZero(size.width - left - right)
+		end
+
+		local height: float? = placement.height
+		if top != nil and bottom != nil then
+			height = atLeastZero(size.height - top - bottom)
+		end
+
+		local childSize: Size = child.layout(
+			Constraints(width ?? 0.0, width ?? size.width, height ?? 0.0, height ?? size.height)
+		)
+
+		local x: float = 0.0
+		if left != nil then
+			x = left
+		elseif right != nil then
+			x = size.width - right - childSize.width
+		else
+			x = self.alignment.inscribe(childSize, size).dx
+		end
+
+		local y: float = 0.0
+		if top != nil then
+			y = top
+		elseif bottom != nil then
+			y = size.height - bottom - childSize.height
+		else
+			y = self.alignment.inscribe(childSize, size).dy
+		end
+
+		return Offset(x, y)
+	end
+end
+
+-- Place a child at explicit coordinates inside a `ZStack`. Giving both edges of
+-- an axis (`left` and `right`) stretches the child between them.
+export class Positioned extends SingleChildView
+	left: float?
+	top: float?
+	right: float?
+	bottom: float?
+	width: float?
+	height: float?
+
+	fn init(
+		child: View? = nil,
+		left: float? = nil,
+		top: float? = nil,
+		right: float? = nil,
+		bottom: float? = nil,
+		width: float? = nil,
+		height: float? = nil,
+		key: string? = nil
+	)
+		self.super(child, key)
+
+		self.left = left
+		self.top = top
+		self.right = right
+		self.bottom = bottom
+		self.width = width
+		self.height = height
+	end
+
+	static fn fill(child: View? = nil) -> Positioned
+		return Positioned(child, 0.0, 0.0, 0.0, 0.0)
+	end
+
+	fn zStackData() -> ZStackData?
+		return ZStackData(self.left, self.top, self.right, self.bottom, self.width, self.height)
+	end
+end

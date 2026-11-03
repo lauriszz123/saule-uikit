@@ -1,0 +1,211 @@
+import * from shine
+
+-- ============================================================================
+-- Dates
+-- ============================================================================
+--
+-- A plain calendar value: no time, no zone, no engine. The arithmetic goes
+-- through days-since-epoch rather than month-by-month fiddling, so "31
+-- January plus one month" clamps to the 28th and leap years need no special
+-- case. The calendar *views* live in `controls.DateField`.
+
+local monthNames: table<string> = {
+	"January",
+	"February",
+	"March",
+	"April",
+	"May",
+	"June",
+	"July",
+	"August",
+	"September",
+	"October",
+	"November",
+	"December",
+}
+
+local monthLengths: table<integer> = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
+
+local weekdayNames: table<string> = {"Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"}
+
+-- `int()` only converts numbers, so a date read out of `Os.date` is parsed a
+-- digit at a time.
+local fn parseInt(text: string) -> integer
+	local value: integer = 0
+	local i: integer = 1
+
+	while i <= String.len(text) do
+		local code: integer? = String.byte(text, i)
+
+		if code != nil and code! >= 48 and code! <= 57 then
+			value = value * 10 + (code! - 48)
+		end
+
+		i = i + 1
+	end
+
+	return value
+end
+
+local fn atMostInt(value: integer, ceiling: integer) -> integer
+	if value > ceiling then
+		return ceiling
+	end
+
+	return value
+end
+
+export class Date
+	year: integer
+	month: integer
+	day: integer
+
+	fn init(year: integer = 1970, month: integer = 1, day: integer = 1)
+		self.year = year
+		self.month = month
+		self.day = day
+	end
+
+	static fn today() -> Date
+		return Date(parseInt(Os.date("%Y")), parseInt(Os.date("%m")), parseInt(Os.date("%d")))
+	end
+
+	static fn isLeapYear(year: integer) -> boolean
+		return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+	end
+
+	static fn lengthOfMonth(year: integer, month: integer) -> integer
+		if month < 1 or month > 12 then
+			return 30
+		end
+
+		if month == 2 and Date.isLeapYear(year) then
+			return 29
+		end
+
+		return monthLengths[month]
+	end
+
+	static fn monthName(month: integer) -> string
+		if month < 1 or month > 12 then
+			return "?"
+		end
+
+		return monthNames[month]
+	end
+
+	static fn weekdayName(weekday: integer) -> string
+		return weekdayNames[weekday + 1]
+	end
+
+	-- Days since 1970-01-01, by Howard Hinnant's civil-calendar algorithm.
+	--
+	-- It assumes floor division, which for Saule's truncating `/` means years
+	-- from 1 AD onward — everything a UI will ever show.
+	static fn toEpochDay(year: integer, month: integer, day: integer) -> integer
+		local y: integer = year
+
+		if month <= 2 then
+			y = y - 1
+		end
+
+		local era: integer = y / 400
+		local yoe: integer = y - era * 400
+
+		local shifted: integer = month + 9
+
+		if month > 2 then
+			shifted = month - 3
+		end
+
+		local doy: integer = (153 * shifted + 2) / 5 + day - 1
+		local doe: integer = yoe * 365 + yoe / 4 - yoe / 100 + doy
+
+		return era * 146097 + doe - 719468
+	end
+
+	static fn fromEpochDay(days: integer) -> Date
+		local z: integer = days + 719468
+		local era: integer = z / 146097
+		local doe: integer = z - era * 146097
+		local yoe: integer = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+		local y: integer = yoe + era * 400
+		local doy: integer = doe - (365 * yoe + yoe / 4 - yoe / 100)
+		local mp: integer = (5 * doy + 2) / 153
+		local d: integer = doy - (153 * mp + 2) / 5 + 1
+
+		local m: integer = mp - 9
+
+		if mp < 10 then
+			m = mp + 3
+		end
+
+		if m <= 2 then
+			y = y + 1
+		end
+
+		return Date(y, m, d)
+	end
+
+	fn epochDay() -> integer
+		return Date.toEpochDay(self.year, self.month, self.day)
+	end
+
+	-- 0 = Sunday. 1970-01-01 was a Thursday, hence the +4.
+	fn weekday() -> integer
+		local shifted: integer = (self.epochDay() + 4) % 7
+
+		if shifted < 0 then
+			return shifted + 7
+		end
+
+		return shifted
+	end
+
+	fn daysInMonth() -> integer
+		return Date.lengthOfMonth(self.year, self.month)
+	end
+
+	fn addDays(count: integer) -> Date
+		return Date.fromEpochDay(self.epochDay() + count)
+	end
+
+	-- Add whole months, clamping the day to the target month's length so
+	-- "31 January plus one month" lands on the 28th or 29th rather than
+	-- spilling into March.
+	fn addMonths(count: integer) -> Date
+		local total: integer = self.year * 12 + self.month - 1 + count
+		local year: integer = total / 12
+		local month: integer = total % 12 + 1
+
+		if month < 1 then
+			month = month + 12
+			year = year - 1
+		end
+
+		local day: integer = atMostInt(self.day, Date.lengthOfMonth(year, month))
+
+		return Date(year, month, day)
+	end
+
+	fn startOfMonth() -> Date
+		return Date(self.year, self.month, 1)
+	end
+
+	fn equals(other: Date) -> boolean
+		return self.year == other.year and self.month == other.month and self.day == other.day
+	end
+
+	fn isBefore(other: Date) -> boolean
+		return self.epochDay() < other.epochDay()
+	end
+
+	-- ISO order, which sorts correctly as a string.
+	fn toString() -> string
+		return String.format("%04d-%02d-%02d", self.year, self.month, self.day)
+	end
+
+	fn describe() -> string
+		return String.format("%d %s %d", self.day, Date.monthName(self.month), self.year)
+	end
+end

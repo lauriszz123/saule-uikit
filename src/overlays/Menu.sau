@@ -1,0 +1,190 @@
+import * from shine
+import * from core.Geometry
+import * from core.Color
+import * from core.TextStyle
+import * from core.ThemeData
+import * from core.Input
+import * from framework.Framework
+import * from Theme
+import * from animation.Animation
+import * from gestures.Gesture
+import * from layout.Boxes
+import * from layout.Stacks
+import * from layout.ZStack
+import * from overlays.Barrier
+import * from painting.Paint
+import * from overlays.Manager
+
+-- ============================================================================
+-- Menus
+-- ============================================================================
+--
+-- Anchored at a point and nudged back on screen near the edges.
+
+-- Show a menu anchored at a point in window coordinates — what a dropdown or a
+-- right-click menu wants.
+--
+--     showMenu(context, x, y, items: {
+--         MenuItem("Copy", fn() copy() end),
+--         MenuItem("Paste", fn() paste() end)
+--     })
+--
+-- Clicking anywhere outside closes it. The menu is nudged back inside the
+-- window if it would run off the right or bottom edge.
+export fn showMenu(
+	context: BuildContext,
+	x: float,
+	y: float,
+	items: table<MenuItem> = {},
+	width: float = 180.0
+) -> OverlayHandle?
+	local owner: BuildOwner? = context.owner()
+
+	if owner == nil then
+		return nil
+	end
+
+	local overlay: OverlayRegistry = owner!.overlay()
+	local entry: OverlayEntry = OverlayEntry() do
+		return Frame()
+	end
+
+	local handle: OverlayHandle = OverlayHandle(overlay, entry)
+
+	entry.builder = fn()
+		local rows: table<View> = {}
+
+		for item: MenuItem in items do
+			rows[#rows + 1] = MenuRow(item, handle)
+		end
+
+		-- Rough height: enough to keep the menu on screen without measuring it.
+		local height: float = ((#rows) as float) * 30.0 + 12.0
+		local windowWidth: integer, windowHeight: integer = Window.getSize()
+		local left: float = atMost(x, (windowWidth as float) - width - 8.0)
+		local top: float = atMost(y, (windowHeight as float) - height - 8.0)
+
+		return ModalBarrier(
+			onDismiss: fn()
+				handle.dismiss()
+			end,
+			child: Focus(
+				modal: true,
+				tabStop: false,
+				onKeyDown: fn(event: KeyEvent)
+					if event.key == "escape" then
+						handle.dismiss()
+
+						return true
+					end
+
+					return false
+				end,
+				child: ZStack(
+					children: {
+						Positioned(
+							left: atLeastZero(left),
+							top: atLeastZero(top),
+							width: width,
+							child: OverlayMotion(
+								handle: handle,
+								rise: 8.0,
+								child: Box(
+									color: Colors.surfaceLight,
+									border: Colors.border,
+									radius: 8.0,
+									padding: EdgeInsets.all(6.0),
+									child: VStack(alignment: StackAlignment.Fill, sizing: StackSize.Fit, children: rows)
+								)
+							)
+						),
+					}
+				)
+			)
+		)
+	end
+
+	overlay.insert(entry)
+
+	return handle
+end
+
+-- One entry in a menu.
+export class MenuItem
+	label: string
+	onSelected: fn() -> nil
+	enabled: boolean
+
+	fn init(label: string = "", onSelected: fn() -> nil = () => nil, enabled: boolean = true)
+		self.label = label
+		self.onSelected = onSelected
+		self.enabled = enabled
+	end
+end
+
+-- A menu row: highlights on hover, closes the menu when chosen.
+export class MenuRow extends View
+	item: MenuItem
+	handle: OverlayHandle
+
+	fn init(item: MenuItem, handle: OverlayHandle, key: string? = nil)
+		self.super(key)
+
+		self.item = item
+		self.handle = handle
+	end
+
+	fn tick(el: Element, dt: float) -> nil
+		if not self.item.enabled then
+			return
+		end
+
+		if motionOn(el.data.scratch, "hover", el.data.hovered, 0.11).step(dt) then
+			el.markNeedsBuild()
+		end
+	end
+
+	fn body(context: BuildContext) -> View
+		local data: ElementData = context.data()
+		local hovered: boolean = data.hovered
+
+		local label: Color = Colors.text
+
+		if not self.item.enabled then
+			label = Colors.textMuted
+		end
+
+		-- Always a colour, never nil: a row whose highlight came and went by
+		-- adding and removing the box would have nothing to fade.
+		local lit: float = motionOn(data.scratch, "hover", hovered, 0.11).value
+		local fill: Color = Colors.primary.withAlpha(lit)
+
+		local row: View = Box(
+			color: fill,
+			radius: 4.0,
+			padding: EdgeInsets.symmetric(horizontal: 10.0, vertical: 6.0),
+			alignment: Alignment.centerLeft(),
+			child: Text(self.item.label, style: TextStyle(color: label))
+		)
+
+		if not self.item.enabled then
+			return row
+		end
+
+		return GestureArea(
+			child: row,
+			onTap: fn()
+				self.handle.dismiss()
+
+				local selected: (fn() -> nil)? = self.item.onSelected
+				if selected != nil then
+					selected()
+				end
+			end,
+			onHover: fn(inside: boolean)
+				data.hovered = inside
+				context.markNeedsBuild()
+			end
+		)
+	end
+end

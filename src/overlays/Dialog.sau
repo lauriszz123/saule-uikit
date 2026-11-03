@@ -1,0 +1,107 @@
+import * from shine
+import * from core.Geometry
+import * from core.Color
+import * from core.TextStyle
+import * from core.ThemeData
+import * from core.Input
+import * from framework.Framework
+import * from Theme
+import * from gestures.Gesture
+import * from layout.Boxes
+import * from overlays.Barrier
+import * from painting.Paint
+import * from overlays.Manager
+
+-- ============================================================================
+-- Dialogs
+-- ============================================================================
+
+-- Show a modal dialog, centred, over a dimmed screen.
+--
+--     local handle: OverlayHandle? = showDialog(context) do
+--         return VStack(children: {Text("Delete this?"), ...})
+--     end
+--     ...
+--     handle?.close()
+--
+-- The `content` block supplies the dialog's *contents*; the frame, padding and
+-- background come from here. Focus is confined to the dialog while it is open,
+-- so Tab can't wander into the screen behind it.
+--
+-- Returns nil only if the context has no owner, which means the view calling
+-- it was never mounted.
+export fn showDialog(
+	context: BuildContext,
+	width: float? = nil,
+	dismissible: boolean = true,
+	barrierColor: Color? = nil,
+	background: Color? = nil,
+	content: fn() -> View = fn()
+		return Frame()
+	end
+) -> OverlayHandle?
+	local owner: BuildOwner? = context.owner()
+
+	if owner == nil then
+		return nil
+	end
+
+	local overlay: OverlayRegistry = owner!.overlay()
+	local entry: OverlayEntry = OverlayEntry() do
+		return Frame()
+	end
+
+	local handle: OverlayHandle = OverlayHandle(overlay, entry)
+
+	-- The real builder needs the handle so the dialog can close itself, and the
+	-- handle needs the entry — hence the placeholder above, replaced here.
+	entry.builder = fn()
+		local dismiss: (fn() -> nil)? = nil
+
+		if dismissible then
+			dismiss = fn()
+				handle.dismiss()
+			end
+		end
+
+		-- The dim comes up with the dialog: a barrier that snaps to full black
+		-- and then waits for the box to fade in reads as two separate events.
+		local dim: Color = barrierColor ?? Colors.black.withAlpha(0.45)
+
+		return ModalBarrier(
+			color: dim.withAlpha(dim.a * handle.progress()),
+			onDismiss: dismiss,
+			child: Focus(
+				modal: true,
+				tabStop: false,
+				onKeyDown: fn(event: KeyEvent)
+					if dismissible and event.key == "escape" then
+						handle.dismiss()
+
+						return true
+					end
+
+					return false
+				end,
+				child: Center(
+					child: OverlayMotion(
+						handle: handle,
+						rise: 14.0,
+						child: Box(
+							width: width ?? 360.0,
+							color: background ?? Colors.surfaceLight,
+							border: Colors.border,
+							radius: 10.0,
+							padding: EdgeInsets.all(20.0),
+							child: content()
+						)
+					)
+				)
+			)
+		)
+	end
+
+	overlay.insert(entry)
+
+	return handle
+end

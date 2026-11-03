@@ -1,0 +1,49 @@
+import * from shine
+import * from core.Geometry
+import * from core.Color
+import * from core.TextStyle
+import * from core.ThemeData
+import * from core.Input
+import * from framework.Framework
+import * from Theme
+
+-- ============================================================================
+-- Shared control helpers
+-- ============================================================================
+
+-- ============================================================================
+-- Controls
+-- ============================================================================
+--
+-- The standard set. Every one of them is focusable, operable from the keyboard,
+-- and themed — so a control dropped into an app inherits its palette without
+-- being told about it.
+--
+-- They follow `Button`'s shape: stateless views keeping hover, press and
+-- focus flags in element scratch, which survives the rebuild each interaction
+-- triggers.
+
+-- Where an element sits in window coordinates.
+--
+-- Offsets are stored relative to the parent, so the absolute position is the
+-- sum up the chain. A dropdown needs it to put its menu in the right place.
+export fn absoluteOf(element: Element) -> Offset
+	local x: float = 0.0
+	local y: float = 0.0
+	local node: Element? = element
+	local walking: boolean = true
+
+	while walking do
+		local current: Element? = node
+
+		if current == nil then
+			walking = false
+		else
+			x = x + current!.offset.dx
+			y = y + current!.offset.dy
+			node = current!.parent
+		end
+	end
+
+	return Offset(x, y)
+end

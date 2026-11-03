@@ -1,0 +1,122 @@
+import * from shine
+
+-- ============================================================================
+-- Frame diagnostics and the cursor request
+-- ============================================================================
+--
+-- Per-frame global state that the framework writes and the frame loop reads.
+-- Separated from the view tree because none of it names a `View` or an
+-- `Element` — it is the bookkeeping *around* a frame, not part of one.
+
+-- Which cursor the pointer should show this frame.
+--
+-- Views ask rather than set, because several of them are under the pointer at
+-- once and only the innermost should win. Move events are dispatched
+-- depth-first with the front-most sibling first, so the *first* request in a
+-- frame is the innermost topmost one — which is why this keeps the first and
+-- ignores the rest.
+export class Cursors
+	static local requested: string = ""
+	static local applied: string = ""
+
+	static fn request(cursor: string) -> nil
+		if #Cursors.requested == 0 then
+			Cursors.requested = cursor
+		end
+	end
+
+	-- What was requested this frame, for tests and diagnostics.
+	static fn wanted() -> string
+		if #Cursors.requested == 0 then
+			return "arrow"
+		end
+
+		return Cursors.requested
+	end
+
+	-- Called by the frame loop before routing the pointer.
+	static fn beginFrame() -> nil
+		Cursors.requested = ""
+	end
+
+	-- Called after routing. The engine call only happens on a change: setting
+	-- the same cursor sixty times a second is a syscall per frame for nothing.
+	static fn apply() -> nil
+		local wanted: string = Cursors.requested
+
+		if #wanted == 0 then
+			wanted = "arrow"
+		end
+
+		if wanted != Cursors.applied then
+			Cursors.applied = wanted
+			Mouse.setCursor(wanted)
+		end
+	end
+end
+
+-- A repaint that no rebuild asks for.
+--
+-- The frame loop only repaints when something is dirty, which covers every
+-- change that goes through `setState`. A few things animate inside `paint`
+-- itself off the wall clock — a blinking caret, an indeterminate progress bar —
+-- and nothing marks those dirty. They call `request` while painting, and that
+-- is what brings the next frame around.
+export class Repaint
+	static local requested: boolean = false
+	static local deadline: float = -1.0
+
+	-- Repaint on the very next frame. For something that moves continuously,
+	-- like an indeterminate progress bar.
+	static fn request() -> nil
+		Repaint.requested = true
+	end
+
+	-- Repaint once the clock reaches `at`, whenever that is. Several callers
+	-- can ask and the earliest wins.
+	--
+	-- This is what a slow, stepped animation wants. A caret blinking twice a
+	-- second only looks different on the two flips; asking for a frame at the
+	-- next flip costs two repaints a second instead of sixty that draw the
+	-- identical caret.
+	static fn requestAt(at: float) -> nil
+		if Repaint.deadline < 0.0 or at < Repaint.deadline then
+			Repaint.deadline = at
+		end
+	end
+
+	-- Consume whatever is due; the frame loop calls this once per frame.
+	static fn take() -> boolean
+		local wanted: boolean = Repaint.requested
+		Repaint.requested = false
+
+		local at: float = Repaint.deadline
+
+		if at >= 0.0 and Timer.getTime() >= at then
+			Repaint.deadline = -1.0
+			wanted = true
+		end
+
+		return wanted
+	end
+end
+
+-- How much work the last layout pass actually did.
+--
+-- `ran` counts elements that re-ran their layout; `skipped` counts those that
+-- reused a cached size. On a settled screen almost everything should be
+-- skipped — if `ran` stays high frame after frame, something is marking itself
+-- dirty every frame.
+export class LayoutStats
+	static ran: integer = 0
+	static skipped: integer = 0
+
+	static fn reset() -> nil
+		LayoutStats.ran = 0
+		LayoutStats.skipped = 0
+	end
+
+	static fn describe() -> string
+		return String.format("layout: %d ran, %d skipped", LayoutStats.ran, LayoutStats.skipped)
+	end
+end

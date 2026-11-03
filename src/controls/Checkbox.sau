@@ -1,0 +1,213 @@
+import * from shine
+import * from core.Geometry
+import * from core.Color
+import * from core.TextStyle
+import * from core.ThemeData
+import * from core.Input
+import * from framework.Framework
+import * from Theme
+import * from animation.Animation
+import * from controls.Activatable
+import * from core.Tween
+import * from framework.Diagnostics
+
+-- ============================================================================
+-- Checkbox
+-- ============================================================================
+--
+-- The mark is a render view; the control is the `Activatable` around it.
+
+-- ----------------------------------------------------------------------------
+-- Checkbox, Radio, Toggle
+-- ----------------------------------------------------------------------------
+
+-- The box itself, without the label. Drawn rather than composed because a tick
+-- is two lines and a rounded square.
+export class CheckMark extends View
+	checked: boolean
+	enabled: boolean
+	hovered: boolean
+	focused: boolean
+	theme: ThemeData
+	side: float
+
+	fn init(
+		checked: boolean = false,
+		enabled: boolean = true,
+		hovered: boolean = false,
+		focused: boolean = false,
+		theme: ThemeData? = nil,
+		side: float = 18.0,
+		key: string? = nil
+	)
+		self.super(key)
+
+		self.checked = checked
+		self.enabled = enabled
+		self.hovered = hovered
+		self.focused = focused
+		self.theme = theme ?? ThemeData()
+		self.side = side
+	end
+
+	fn layout(el: Element, constraints: Constraints) -> Size
+		return constraints.constrain(Size(self.side, self.side))
+	end
+
+	-- This is the cheap half of the two animation shapes: a render view owns
+	-- its controllers, advances them here, and asks for the next frame with
+	-- `Repaint.request()`. Nothing rebuilds and nothing is laid out again — the
+	-- box is simply drawn differently, so a tick sweeping on costs a repaint
+	-- and no build work whatsoever.
+	fn tick(el: Element, dt: float) -> nil
+		local bag: table = el.data.scratch
+		local mark: AnimationController = motionOn(bag, "mark", self.checked, 0.2, EasingTypes.OutCubic)
+		local glow: AnimationController = motionOn(bag, "glow", self.hovered, 0.14)
+		local ring: AnimationController = motionOn(bag, "ring", self.focused, 0.12)
+
+		local moved: boolean = mark.step(dt)
+
+		if glow.step(dt) then
+			moved = true
+		end
+
+		if ring.step(dt) then
+			moved = true
+		end
+
+		if moved then
+			Repaint.request()
+		end
+	end
+
+	fn paint(el: Element, x: float, y: float) -> nil
+		local side: float = el.size.width
+		local bag: table = el.data.scratch
+
+		-- Re-aimed here as well as in `tick`, because a freshly mounted element
+		-- paints before it has ever ticked — and a box built already-checked
+		-- has to draw checked rather than sweeping itself on.
+		local ticked: float = motionOn(bag, "mark", self.checked, 0.2, EasingTypes.OutCubic).value
+		local lit: float = motionOn(bag, "glow", self.hovered, 0.14).value
+		local ringAt: float = motionOn(bag, "ring", self.focused, 0.12).value
+
+		local fill: Color = self.theme.surface.lerp(self.theme.primary, ticked)
+		local edge: Color = self.theme.border.lerp(self.theme.primary, atLeast(ticked, lit))
+
+		if not self.enabled then
+			fill = self.theme.surface
+			edge = self.theme.border.withAlpha(0.5)
+		end
+
+		fill.apply()
+		Graphics.rectangle("fill", x, y, side, side, 4.0, 4.0)
+
+		edge.apply()
+		Graphics.setLineWidth(1.0)
+		Graphics.rectangle("line", x, y, side, side, 4.0, 4.0)
+
+		if ticked > 0.0 then
+			-- A tick, drawn as two strokes across the middle of the box — and
+			-- drawn *on*, short stroke first and then the long one up. Giving
+			-- each stroke its own share of the progress is what makes it read
+			-- as a pen moving rather than a line growing diagonally.
+			self.theme.text.apply()
+			Graphics.setLineWidth(2.0)
+
+			local cornerX: float = x + side * 0.44
+			local cornerY: float = y + side * 0.72
+			local startX: float = x + side * 0.24
+			local startY: float = y + side * 0.52
+			local endX: float = x + side * 0.78
+			local endY: float = y + side * 0.3
+
+			local down: float = atMost(ticked / 0.4, 1.0)
+			Graphics.line(
+				startX,
+				startY,
+				startX + (cornerX - startX) * down,
+				startY + (cornerY - startY) * down
+			)
+
+			if ticked > 0.4 then
+				local up: float = (ticked - 0.4) / 0.6
+				Graphics.line(
+					cornerX,
+					cornerY,
+					cornerX + (endX - cornerX) * up,
+					cornerY + (endY - cornerY) * up
+				)
+			end
+		end
+
+		if ringAt > 0.0 then
+			self.theme.text.withAlpha(ringAt).apply()
+			Graphics.setLineWidth(1.0)
+			Graphics.rectangle("line", x - 3.0, y - 3.0, side + 6.0, side + 6.0, 6.0, 6.0)
+		end
+	end
+end
+
+-- A labelled checkbox.
+--
+--     Checkbox(
+--         value: agreed,
+--         label: "I agree",
+--         onChanged: fn(next: boolean)
+--             agreed = next
+--         end
+--     )
+--
+-- `onChanged` is `fn(value: boolean)`. The view does not keep the value —
+-- hand it back the one it gave you, the way every other controlled input works.
+export class Checkbox extends View
+	value: boolean
+	label: string
+	onChanged: (fn(boolean) -> nil)?
+	enabled: boolean
+	autofocus: boolean
+
+	fn init(
+		value: boolean = false,
+		label: string = "",
+		onChanged: (fn(boolean) -> nil)? = nil,
+		enabled: boolean = true,
+		autofocus: boolean = false,
+		key: string? = nil
+	)
+		self.super(key)
+
+		self.value = value
+		self.label = label
+		self.onChanged = onChanged
+		self.enabled = enabled
+		self.autofocus = autofocus
+	end
+
+	local fn toggle() -> nil
+		local changed: (fn(boolean) -> nil)? = self.onChanged
+
+		if changed != nil and self.enabled then
+			changed(not self.value)
+		end
+	end
+
+	fn body(context: BuildContext) -> View
+		return Activatable(
+			label: self.label,
+			enabled: self.enabled,
+			autofocus: self.autofocus,
+			onActivate: fn()
+				self.toggle()
+			end
+		) do (hovered: boolean, focused: boolean, theme: ThemeData)
+			return CheckMark(
+				checked: self.value,
+				enabled: self.enabled,
+				hovered: hovered,
+				focused: focused,
+				theme: theme
+			)
+		end
+	end
+end

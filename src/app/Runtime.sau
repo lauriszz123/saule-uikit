@@ -1,0 +1,257 @@
+import * from shine
+import * from core.Geometry
+import * from core.Color
+import * from core.Events
+import * from core.Input
+import * from framework.Framework
+import * from framework.Diagnostics
+import * from painting.Paint
+import * from overlays.Manager
+
+-- ============================================================================
+-- The frame loop
+-- ============================================================================
+--
+-- `runApp` opens a window and drives the tree until it closes. It lives above
+-- the framework rather than inside it: it is the one piece that has to name
+-- every layer at once, and nothing in the framework calls back into it.
+
+-- ----------------------------------------------------------------------------
+-- Running an app
+-- ----------------------------------------------------------------------------
+
+-- Route one event into the tree.
+--
+-- Pointer motion is deliberately absent: the frame loop resolves hover once per
+-- frame from the latest position, because a view wants to know where the
+-- pointer ended up, not every step it took getting there.
+--
+-- Tab is handled last, and only if nothing claimed it: a view that wants
+-- literal tabs just returns true from `handleKey`.
+-- Is Command (macOS) / Windows / Super held?
+--
+-- Polled rather than taken off the event: the engine's key events carry shift,
+-- ctrl and alt only, so this is the one modifier that has to be read at level.
+local fn metaDown() -> boolean
+	return Keyboard.isAnyDown({"lgui", "rgui"})
+end
+
+local fn dispatchEvent(focus: FocusManager, root: Element, event: Event) -> nil
+	match event
+		case Event.MousePressed(x, y, button) then root.dispatch(
+			PointerEvent(PointerKind.Down, Display.toLogical(x), Display.toLogical(y), 0.0, 0.0, button),
+			0.0,
+			0.0
+		)
+
+		case Event.MouseReleased(x, y, button) then root.dispatch(
+			PointerEvent(PointerKind.Up, Display.toLogical(x), Display.toLogical(y), 0.0, 0.0, button),
+			0.0,
+			0.0
+		)
+
+		case Event.WheelMoved(dx, dy) then
+
+			-- The wheel carries no position of its own, so it is routed to
+			-- whatever is under the pointer right now — which is what makes
+			-- nested scroll views work.
+			local rawX: float, rawY: float = Mouse.getPos()
+
+			root.dispatch(
+				PointerEvent(PointerKind.Scroll, Display.toLogical(rawX), Display.toLogical(rawY), dx, dy),
+				0.0,
+				0.0
+			)
+
+		case Event.KeyPressed(key, shift, ctrl, alt) then
+			local handled: boolean = focus.dispatchKey(
+				root,
+				KeyEvent(KeyEventKind.Down, key, "", shift, ctrl, alt, metaDown())
+			)
+
+			if not handled and key == "tab" then
+				if shift then
+					focus.focusPrevious()
+				else
+					focus.focusNext()
+				end
+			end
+
+		case Event.KeyReleased(key, shift, ctrl, alt) then focus.dispatchKey(
+			root,
+			KeyEvent(KeyEventKind.Up, key, "", shift, ctrl, alt, metaDown())
+		)
+
+		-- Typed text is separate from key presses: it is already modifier- and
+		-- layout-corrected, and one keypress can produce several characters.
+		-- The event carries no modifiers of its own, so they are read at level
+		-- — which is what a handler wants anyway ("was ctrl held as I typed").
+		case Event.TextInput(typed) then focus.dispatchKey(
+			root,
+			KeyEvent(
+				KeyEventKind.Text,
+				"",
+				typed,
+				Keyboard.isAnyDown({"lshift", "rshift"}),
+				Keyboard.isAnyDown({"lctrl", "rctrl"}),
+				Keyboard.isAnyDown({"lalt", "ralt"}),
+				metaDown()
+			)
+		)
+
+		case _ then nil
+	end
+end
+
+-- Open a window and drive `root` until it closes.
+--
+--     runApp(MyApp(), width: 900, height: 600, title: "Demo")
+--
+-- One frame is: tick animations, flush pending rebuilds, lay the tree out
+-- against the window size, refresh focus, route the mouse and the keyboard,
+-- flush again (a handler may have called `setState`), then paint.
+--
+-- `keyRepeat` is on by default because it is what editing keys want: hold
+-- backspace and it keeps deleting. Turn it off for a game-style app that reads
+-- held keys itself.
+export fn runApp(
+	root: View,
+	width: integer = 800,
+	height: integer = 600,
+	title: string = "Saule",
+	background: Color? = nil,
+	keyRepeat: boolean = true
+) -> nil
+	Window.create(width, height, title)
+	Keyboard.setKeyRepeat(keyRepeat)
+	Keyboard.setTextInput(false)
+
+	local owner: BuildOwner = BuildOwner()
+	local focus: FocusManager = owner.focus()
+
+	-- Everything runs under the overlay host, so a dialog opened from anywhere
+	-- in the tree has somewhere to go.
+	local rootElement: Element = owner.attachRoot(OverlayHost(root, owner.overlay()))
+	local clear: Color = background ?? Colors.surface
+
+	-- Repainting is the expensive half of a frame, and most frames change
+	-- nothing: the pointer sits still, no animation is running, and the tree
+	-- would be redrawn pixel for pixel identically. `needsPaint` gates that
+	-- work. It starts true so the first frame always draws.
+	local needsPaint: boolean = true
+
+	while Window.isOpen() do
+		local events: table<Event> = pollEvents()
+
+		-- Both of these can change while running: the window is resizable, and
+		-- moving it to another monitor can change the density.
+		Display.setScale(Window.getScale())
+
+		rootElement.tick(Timer.getDelta())
+
+		-- An animation ticking marks its element dirty, so asking before the
+		-- flush is what catches it — afterwards the list is empty again.
+		if owner.hasPendingWork() then
+			needsPaint = true
+		end
+
+		owner.flush()
+
+		-- A resize hands back a fresh, blank framebuffer, so there is nothing
+		-- left to keep and the frame has to be redrawn.
+		for event: Event in events do
+			match event
+				case Event.Resized(_, _) then
+					needsPaint = true
+
+				case _ then nil
+			end
+		end
+
+		local windowWidth: integer, windowHeight: integer = Window.getSize()
+		local logical: Size = Size(
+			Display.toLogical(windowWidth as float),
+			Display.toLogical(windowHeight as float)
+		)
+
+		rootElement.offset = Offset.zero()
+		rootElement.layout(Constraints.tight(logical))
+
+		-- Nothing arrived and nothing was already dirty, so no hit test can have
+		-- changed its answer and no handler has anything to run. Skipping the
+		-- focus walk and the hover pass is most of what an idle frame saves.
+		if #events > 0 or needsPaint then
+			-- Focus order follows the tree, so it has to be re-derived after the
+			-- rebuilds above and before anything is routed.
+			focus.refresh(rootElement)
+
+			-- Hover is resolved once, from where the pointer is now. It runs
+			-- even on a frame with no motion, because a scrolled list or a
+			-- panel that grew moves views under a stationary pointer.
+			--
+			-- Pointer coordinates arrive in physical pixels; the tree is laid
+			-- out in logical ones, so they have to be converted or every hit
+			-- test is off by the scale factor.
+			local rawX: float, rawY: float = Mouse.getPos()
+
+			-- Cursor requests are gathered during the move pass and applied
+			-- after, so the innermost view under the pointer wins.
+			Cursors.beginFrame()
+			rootElement.dispatch(
+				PointerEvent(PointerKind.Move, Display.toLogical(rawX), Display.toLogical(rawY)),
+				0.0,
+				0.0
+			)
+			Cursors.apply()
+
+			-- Then everything else, in the order it actually happened. Buttons,
+			-- wheel and keys are interleaved exactly as the OS delivered them,
+			-- which the old per-frame edge queries could not express.
+			for event: Event in events do
+				dispatchEvent(focus, rootElement, event)
+			end
+		end
+
+		-- A handler may have called `setState`; rebuild before painting so the
+		-- click is visible on this frame rather than the next one.
+		if owner.hasPendingWork() then
+			needsPaint = true
+		end
+
+		owner.flush()
+
+		-- Then lay out *again*, because that rebuild can have replaced whole
+		-- subtrees — a hover that gives a view a background changes its child's
+		-- class, and the fresh elements have no size yet. Painting them
+		-- unmeasured drew their contents at the parent's origin for one frame,
+		-- which looked like the text jittering to the top-left before settling.
+		--
+		-- Relayout boundaries make this nearly free: with nothing dirty it is one
+		-- comparison at the root.
+		rootElement.layout(Constraints.tight(logical))
+
+		-- A caret or an indeterminate bar animates inside `paint` off the
+		-- clock, with no rebuild behind it. The previous frame's paint is what
+		-- asks for this one.
+		if Repaint.take() then
+			needsPaint = true
+		end
+
+		if needsPaint then
+			Graphics.clear(clear.r, clear.g, clear.b)
+
+			-- One transform turns the whole logical tree into physical pixels.
+			Graphics.push()
+			Graphics.scale(Display.scale(), Display.scale())
+			rootElement.paint(0.0, 0.0)
+			Graphics.pop()
+
+			needsPaint = false
+		end
+
+		-- Always present, even on a skipped frame: the framebuffer still holds
+		-- the last one, and this is the loop's only pacing point — without it
+		-- an idle app would spin as fast as the CPU allows.
+		Graphics.present()
+	end
+end

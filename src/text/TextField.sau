@@ -1,0 +1,497 @@
+import * from shine
+import * from core.Geometry
+import * from core.Color
+import * from core.TextStyle
+import * from framework.Framework
+import * from painting.Paint
+import * from gestures.Gesture
+import * from core.Tween
+import * from animation.Animation
+import * from core.Input
+import * from framework.Diagnostics
+import * from text.TextEngine
+
+-- ============================================================================
+-- Text editing
+-- ============================================================================
+
+-- Half a second on, half a second off, straight off the clock — no rebuild and
+-- no per-frame state. Shared with `TextEditor`.
+export fn blinkOn() -> boolean
+	local now: float = Timer.getTime()
+	local second: float = (now as integer) as float
+	local phase: float = now - second
+
+	-- Reached only from `paint`, and only while a caret is actually on screen.
+	-- Nothing marks a blink dirty, so the frame loop has to be asked back or
+	-- the caret would freeze on whatever phase it stopped at. Asking for the
+	-- next flip rather than the next frame is what keeps an idle text field
+	-- from costing a full repaint sixty times a second.
+	if phase < 0.5 then
+		Repaint.requestAt(second + 0.5)
+
+		return true
+	end
+
+	Repaint.requestAt(second + 1.0)
+
+	return false
+end
+
+-- Draws a string, a selection highlight, and a caret.
+--
+-- The caret blinks off the wall clock inside `paint` rather than off a rebuild,
+-- so an idle field costs nothing.
+export class EditableText extends View
+	text: string
+
+	-- Characters to the left of the caret.
+	caret: integer
+
+	-- The other end of the selection. Equal to `caret` means no selection.
+	anchor: integer
+
+	-- Whether the caret is drawn at all — that is, whether the field has focus.
+	caretVisible: boolean
+
+	style: TextStyle?
+	placeholder: string
+	placeholderStyle: TextStyle?
+	selectionColor: Color?
+
+	fn init(
+		text: string = "",
+		caret: integer = 0,
+		anchor: integer = 0,
+		caretVisible: boolean = false,
+		style: TextStyle? = nil,
+		placeholder: string = "",
+		placeholderStyle: TextStyle? = nil,
+		selectionColor: Color? = nil,
+		key: string? = nil
+	)
+		self.super(key)
+
+		self.text = text
+		self.caret = caret
+		self.anchor = anchor
+		self.caretVisible = caretVisible
+		self.style = style
+		self.placeholder = placeholder
+		self.placeholderStyle = placeholderStyle
+		self.selectionColor = selectionColor
+	end
+
+	local fn resolved() -> TextStyle
+		return self.style ?? TextStyle()
+	end
+
+	-- Clamp an index into the string — a stale one from a shorter rebuild must
+	-- not slice past the end.
+	local fn clamp(index: integer) -> integer
+		local length: integer = String.len(self.text)
+
+		if index < 0 then
+			return 0
+		end
+
+		if index > length then
+			return length
+		end
+
+		return index
+	end
+
+	fn layout(el: Element, constraints: Constraints) -> Size
+		local style: TextStyle = self.resolved()
+		local shown: string = self.text
+
+		if #shown == 0 then
+			shown = self.placeholder
+		end
+
+		-- The height comes from the font, so an empty field still reserves a
+		-- full line.
+		return constraints.constrain(style.measure(shown))
+	end
+
+	fn paint(el: Element, x: float, y: float) -> nil
+		local style: TextStyle = self.resolved()
+		local caret: integer = self.clamp(self.caret)
+		local anchor: integer = self.clamp(self.anchor)
+
+		-- Selection sits behind the glyphs.
+		if caret != anchor then
+			local first: integer = lower(caret, anchor)
+			local last: integer = higher(caret, anchor)
+			local left: float = style.measure(String.sub(self.text, 1, first)).width
+			local right: float = style.measure(String.sub(self.text, 1, last)).width
+
+			local wash: Color = self.selectionColor ?? Colors.primary.withAlpha(0.35)
+			wash.apply()
+			Graphics.rectangle("fill", x + left, y, right - left, el.size.height)
+		end
+
+		if #self.text == 0 and #self.placeholder > 0 then
+			local hint: TextStyle = self.placeholderStyle ?? style
+			hint.draw(self.placeholder, x, y)
+		else
+			style.draw(self.text, x, y)
+		end
+
+		-- A visible selection replaces the caret, the way every editor does it.
+		if self.caretVisible and caret == anchor and blinkOn() then
+			-- Measuring rebinds the font, so re-apply the style before drawing.
+			local prefix: float = style.measure(String.sub(self.text, 1, caret)).width
+
+			style.apply()
+			Graphics.setLineWidth(1.0)
+			Graphics.line(x + prefix, y + 1.0, x + prefix, y + el.size.height - 1.0)
+		end
+	end
+end
+
+-- A single-line text input.
+--
+--     TextField(
+--         placeholder: "Your name",
+--         onChanged: fn(text: string)
+--             println(text)
+--         end
+--     )
+--
+-- Callback shapes:
+--
+--     onChanged / onSubmitted   fn(text: string)
+--
+-- `value` seeds the initial contents; after that the field owns its text and
+-- reports edits through `onChanged`. Like `Button` it is stateless, keeping the
+-- text, caret and selection in element scratch, so it always reads fresh config
+-- from its parent while surviving rebuilds.
+--
+-- Editing: typing, backspace, delete, left/right, home/end, and return to
+-- submit. Shift with any movement key extends the selection; Ctrl+A selects
+-- all; Ctrl+C, Ctrl+X and Ctrl+V use the system clipboard. Click to place the
+-- caret, drag to select, and Tab is deliberately left alone so it still moves
+-- focus.
+--
+-- It fills the width it is given. Inside an `HStack`, wrap it in `Expand` or a
+-- `Frame` — a row's main axis is unbounded.
+export class TextField extends View
+	-- The text the owner wants shown, or nil to let the field keep its own.
+	--
+	-- This is the controlled / uncontrolled distinction, and it has to be a
+	-- real nil rather than an empty string. A field given a `value` is
+	-- controlled: when its owner rebuilds and hands down text the field is not
+	-- showing, the field takes it — that is what makes clearing a composer
+	-- after send, or resetting a form, actually clear the box. A field given
+	-- nothing is uncontrolled and owns its text outright.
+	--
+	-- Defaulting to `""` instead would make those two cases identical, and an
+	-- uncontrolled field whose owner rebuilds — a panel calling
+	-- `markNeedsBuild` from `onChanged`, say — would be handed a default empty
+	-- string and wipe itself on every keystroke.
+	value: string?
+	placeholder: string
+	-- `onSubmitted` is declared *before* `onChanged` on purpose. A trailing
+	-- block binds to the last callback parameter nothing else claimed, so
+	-- this order makes the two natural spellings mean what they look like:
+	--
+	--     TextField(value: name) do (text) name = text end     -- onChanged
+	--
+	--     TextField(value: name, onChanged: fn(text) … end) do (text)
+	--         submit()                                          -- onSubmitted
+	--     end
+	--
+	-- Declared the other way round, the first form would silently fill
+	-- `onSubmitted` and the field would appear to ignore every keystroke.
+	onSubmitted: (fn(string) -> nil)?
+	onChanged: (fn(string) -> nil)?
+
+	style: TextStyle?
+	placeholderStyle: TextStyle?
+	background: Color?
+	border: Color?
+	focusBorder: Color?
+	selectionColor: Color?
+	padding: EdgeInsets?
+	radius: float
+	width: float?
+	enabled: boolean
+	autofocus: boolean
+
+	-- Draw the contents as asterisks. The field still *holds* the real text —
+	-- `onChanged` reports it, and copy still copies it. This only changes what
+	-- is painted, which is all a password field should change.
+	--
+	-- Asterisks rather than bullets on purpose: the caret is placed by
+	-- measuring the drawn string, and a one-byte glyph keeps every index the
+	-- editor holds lined up with what the user sees.
+	obscure: boolean
+
+	fn init(
+		value: string? = nil,
+		placeholder: string = "",
+		onSubmitted: (fn(string) -> nil)? = nil,
+		onChanged: (fn(string) -> nil)? = nil,
+		style: TextStyle? = nil,
+		placeholderStyle: TextStyle? = nil,
+		background: Color? = nil,
+		border: Color? = nil,
+		focusBorder: Color? = nil,
+		selectionColor: Color? = nil,
+		padding: EdgeInsets? = nil,
+		radius: float = 6.0,
+		width: float? = nil,
+		enabled: boolean = true,
+		autofocus: boolean = false,
+		obscure: boolean = false,
+		key: string? = nil
+	)
+		self.super(key)
+
+		self.value = value
+		self.placeholder = placeholder
+		self.onChanged = onChanged
+		self.onSubmitted = onSubmitted
+		self.style = style
+		self.placeholderStyle = placeholderStyle
+		self.background = background
+		self.border = border
+		self.focusBorder = focusBorder
+		self.selectionColor = selectionColor
+		self.padding = padding
+		self.radius = radius
+		self.width = width
+		self.enabled = enabled
+		self.autofocus = autofocus
+		self.obscure = obscure
+	end
+
+	fn tick(el: Element, dt: float) -> nil
+		if not self.enabled then
+			return
+		end
+
+		if motionOn(el.data.scratch, "focus", el.data.focused, 0.15).step(dt) then
+			el.markNeedsBuild()
+		end
+	end
+
+	fn body(context: BuildContext) -> View
+		local data: ElementData = context.data()
+		local scratch: table = data.scratch
+
+		-- Seed on the first build here, and re-seed only when a *controlled*
+		-- field's owner rebuilds it with text it is not showing.
+		--
+		-- The owner-rebuilt test matters because two very different things both
+		-- arrive here as "a build": the field rebuilding itself after a
+		-- keystroke, where `value` is whatever the owner last passed and is
+		-- stale the moment it stops rebuilding per keystroke; and the owner
+		-- rebuilding, handing down a new view object whose `value` is
+		-- authoritative. Only the second may touch the text, and a stale `""`
+		-- and a deliberate `""` are the same string — so the discriminator is
+		-- the view's identity, not its value.
+		local previous: View? = scratch.owner as View
+		local byOwner: boolean = previous == nil or previous! != self
+		local wanted: string? = self.value
+
+		if scratch.text == nil then
+			scratch.text = wanted ?? ""
+			scratch.caret = String.len(wanted ?? "")
+			scratch.anchor = scratch.caret
+		elseif byOwner and wanted != nil and wanted! != (scratch.text as string ?? "") then
+			scratch.text = wanted!
+			scratch.caret = String.len(wanted!)
+			scratch.anchor = scratch.caret
+		end
+
+		scratch.owner = self
+
+		-- The node has to outlive the rebuild that every keystroke causes, so
+		-- the element owns it. `focused` is the framework's own flag, so it is
+		-- read straight off `data` rather than out of the bag.
+		local node: FocusNode = nodeFor(data)
+		local text: string = scratch.text as string ?? ""
+		local caret: integer = scratch.caret as integer ?? 0
+		local anchor: integer = scratch.anchor as integer ?? 0
+		local focused: boolean = data.focused
+		local style: TextStyle = self.style ?? TextStyle()
+
+		-- Everything below works on `shown`: the caret is placed by measuring
+		-- the string that is actually on screen, so hit testing has to agree
+		-- with painting or clicks land on the wrong character.
+		local shown: string = text
+
+		if self.obscure then
+			shown = String.rep("*", String.len(text))
+		end
+
+		local editor: TextEngine = TextEngine(scratch, context, self.onChanged)
+
+		local inner: View = Box(
+			child: EditableText(
+				text: shown,
+				caret: caret,
+				anchor: anchor,
+				caretVisible: focused,
+				style: self.style,
+				placeholder: self.placeholder,
+				placeholderStyle: self.placeholderStyle ?? TextStyle(color: Colors.textMuted),
+				selectionColor: self.selectionColor
+			),
+			width: self.width,
+			color: self.background ?? Colors.surface,
+			radius: self.radius,
+			border: self.borderColor(focused, data),
+			padding: self.padding ?? EdgeInsets.symmetric(horizontal: 10.0, vertical: 8.0),
+			alignment: Alignment.centerLeft(),
+			clip: true
+		)
+
+		if not self.enabled then
+			return inner
+		end
+
+		-- The click coordinate is local to the `GestureArea`, which wraps
+		-- the padded box, so the text starts one padding-left in.
+		local inset: float = (self.padding ?? EdgeInsets.symmetric(horizontal: 10.0, vertical: 8.0)).left
+
+		return Focus(
+			child: GestureArea(
+				child: inner,
+				onTapDown: fn()
+					node.requestFocus()
+				end,
+				onTapAt: fn(x: float, y: float)
+					editor.placeCaret(style.indexAt(shown, x - inset), false)
+				end,
+				onDoubleTapAt: fn(x: float, y: float)
+					editor.selectWord(style.indexAt(shown, x - inset))
+				end,
+				onDragTo: fn(x: float, y: float)
+					editor.placeCaret(style.indexAt(shown, x - inset), true)
+				end
+			).cursor("ibeam"),
+			node: node,
+			autofocus: self.autofocus,
+			wantsText: true,
+			onText: fn(typed: string)
+				editor.insert(typed)
+
+				return true
+			end,
+			onKeyDown: fn(event: KeyEvent)
+				return self.edit(event, editor)
+			end,
+			onFocusChange: fn(gained: boolean)
+				data.focused = gained
+				context.markNeedsBuild()
+			end
+		)
+	end
+
+	-- One editing key. Returns true when the key belonged to the field, so
+	-- everything else — Tab, shortcuts — keeps bubbling.
+	local fn edit(event: KeyEvent, editor: TextEngine) -> boolean
+		local key: string = event.key
+
+		-- `command()`, not `ctrl`: on macOS the shortcut modifier is Command,
+		-- and the engine reports that separately from Control.
+		if event.command() then
+			if key == "a" then
+				editor.selectAll()
+
+				return true
+			elseif key == "c" then
+				editor.copy()
+
+				return true
+			elseif key == "x" then
+				editor.cut()
+
+				return true
+			elseif key == "v" then
+				editor.paste()
+
+				return true
+			elseif key == "z" then
+				-- Shift+Z is the other redo, for muscle memory that came from a
+				-- different editor.
+				if event.shift then
+					editor.redo()
+				else
+					editor.undo()
+				end
+
+				return true
+			elseif key == "y" then
+				editor.redo()
+
+				return true
+			elseif key == "left" then
+				editor.moveWord(-1, event.shift)
+
+				return true
+			elseif key == "right" then
+				editor.moveWord(1, event.shift)
+
+				return true
+			elseif key == "backspace" then
+				editor.deleteWordBack()
+
+				return true
+			elseif key == "delete" then
+				editor.deleteWordForward()
+
+				return true
+			end
+
+			return false
+		end
+
+		if key == "backspace" then
+			editor.backspace()
+
+			return true
+		elseif key == "delete" then
+			editor.forwardDelete()
+
+			return true
+		elseif key == "left" then
+			editor.move(-1, event.shift)
+
+			return true
+		elseif key == "right" then
+			editor.move(1, event.shift)
+
+			return true
+		elseif key == "home" then
+			editor.placeCaret(0, event.shift)
+
+			return true
+		elseif key == "end" then
+			editor.placeCaret(String.len(editor.text()), event.shift)
+
+			return true
+		elseif key == "return" then
+			local submitted: (fn(string) -> nil)? = self.onSubmitted
+			if submitted != nil then
+				submitted(editor.text())
+			end
+
+			return true
+		end
+
+		return false
+	end
+
+	-- Blended rather than switched, so selecting a field is a border easing to
+	-- the accent colour instead of a hard outline appearing around it.
+	local fn borderColor(focused: boolean, data: ElementData) -> Color?
+		local at: float = motionOn(data.scratch, "focus", focused, 0.15).value
+
+		return (self.border ?? Colors.border).lerp(self.focusBorder ?? Colors.primary, at)
+	end
+end

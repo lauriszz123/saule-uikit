@@ -1,0 +1,138 @@
+import * from shine
+import * from core.Geometry
+import * from core.Color
+import * from core.TextStyle
+import * from core.ThemeData
+import * from core.Input
+import * from framework.Framework
+import * from Theme
+import * from animation.Animation
+import * from framework.Diagnostics
+
+-- ============================================================================
+-- Progress
+-- ============================================================================
+--
+-- A nil value means indeterminate, which animates off the frame clock.
+
+-- ----------------------------------------------------------------------------
+-- ProgressView
+-- ----------------------------------------------------------------------------
+
+-- A read-only bar. `value` runs 0..1; pass nil for an indeterminate one, which
+-- animates off the clock rather than off a rebuild.
+export class ProgressView extends View
+	value: float?
+	height: float
+	color: Color?
+
+	fn init(value: float? = nil, height: float = 6.0, color: Color? = nil, key: string? = nil)
+		self.super(key)
+
+		self.value = value
+		self.height = height
+		self.color = color
+	end
+
+	fn body(context: BuildContext) -> View
+		local theme: ThemeData = Theme.of(context)
+
+		return ProgressTrack(
+			value: self.value,
+			height: self.height,
+			color: self.color ?? theme.primary,
+			track: theme.border
+		)
+	end
+end
+
+-- The bar itself. Split out because a render view has no `BuildContext` to
+-- read the theme from.
+export class ProgressTrack extends View
+	value: float?
+	height: float
+	color: Color
+	track: Color
+
+	fn init(
+		value: float? = nil,
+		height: float = 6.0,
+		color: Color? = nil,
+		track: Color? = nil,
+		key: string? = nil
+	)
+		self.super(key)
+
+		self.value = value
+		self.height = height
+		self.color = color ?? Colors.primary
+		self.track = track ?? Colors.border
+	end
+
+	fn layout(el: Element, constraints: Constraints) -> Size
+		local width: float = 160.0
+
+		if constraints.hasBoundedWidth() then
+			width = constraints.maxWidth
+		end
+
+		return constraints.constrain(Size(width, self.height))
+	end
+
+	-- A determinate bar eases towards whatever it was last given, so a value
+	-- that arrives in jumps — a download reporting every few hundred
+	-- kilobytes — still reads as a bar filling rather than a bar teleporting.
+	fn tick(el: Element, dt: float) -> nil
+		local value: float? = self.value
+
+		if value == nil then
+			return
+		end
+
+		if trackerIn(el.data.scratch, "fill", atLeastZero(atMost(value!, 1.0))).step(dt) then
+			Repaint.request()
+		end
+	end
+
+	fn paint(el: Element, x: float, y: float) -> nil
+		local radius: float = el.size.height / 2.0
+
+		self.track.apply()
+		Graphics.rectangle("fill", x, y, el.size.width, el.size.height, radius, radius)
+
+		self.color.apply()
+
+		local value: float? = self.value
+
+		if value != nil then
+			local tracked: Tracker = trackerIn(
+				el.data.scratch,
+				"fill",
+				atLeastZero(atMost(value!, 1.0))
+			)
+			local filled: float = el.size.width * tracked.current
+			Graphics.rectangle("fill", x, y, filled, el.size.height, radius, radius)
+
+			return
+		end
+
+		-- Indeterminate: a short bar sweeping back and forth once a second.
+		-- The sweep comes off the clock rather than a rebuild, so it has to ask
+		-- for the next frame itself.
+		Repaint.request()
+
+		local phase: float = Timer.getTime() - ((Timer.getTime() as integer) as float)
+		local sweep: float = el.size.width * 0.3
+		local travel: float = (el.size.width + sweep) * phase - sweep
+
+		Graphics.rectangle(
+			"fill",
+			atLeast(x, x + travel),
+			y,
+			atMost(sweep, el.size.width - atLeastZero(travel)),
+			el.size.height,
+			radius,
+			radius
+		)
+	end
+end

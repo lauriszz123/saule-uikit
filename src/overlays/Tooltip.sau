@@ -1,0 +1,169 @@
+import * from shine
+import * from core.Geometry
+import * from core.Color
+import * from core.TextStyle
+import * from core.ThemeData
+import * from core.Input
+import * from framework.Framework
+import * from Theme
+import * from layout.Boxes
+import * from layout.ZStack
+import * from overlays.Barrier
+import * from painting.Paint
+import * from overlays.Manager
+
+-- ============================================================================
+-- Tooltips
+-- ============================================================================
+--
+-- Closes its own layer in `unmounted`: layers are held at the root, so
+-- unmounting the opener would otherwise leave the label on screen with
+-- nothing able to dismiss it.
+
+-- A label that follows the pointer, shown while hovering the child.
+--
+--     Tooltip(message: "Delete", child: iconButton)
+--
+-- It is an overlay entry rather than a `ZStack` sibling, so it is never clipped
+-- by a scroll view or covered by a later view.
+export class Tooltip extends SingleChildView
+	message: string
+
+	-- Seconds of hovering before it appears.
+	delay: float
+
+	fn init(child: View? = nil, message: string = "", delay: float = 0.4, key: string? = nil)
+		self.super(child, key)
+
+		self.message = message
+		self.delay = delay
+	end
+
+	-- Hover and pointer position come straight off the broadcast Move events;
+	-- no `GestureArea` in between.
+	fn handleEvent(el: Element, event: PointerEvent, x: float, y: float, inside: boolean) -> boolean
+		if event.kind != PointerKind.Move then
+			return false
+		end
+
+		el.data.hovered = inside
+		el.data.scratch.pointerX = event.x
+		el.data.scratch.pointerY = event.y
+
+		return false
+	end
+
+	-- The tooltip is a layer at the root, so it does not go away with the view
+	-- it belongs to — and `tick`, which is what normally dismisses it, stops
+	-- being called the moment this element is unmounted. Without this a tooltip
+	-- left open when its owner disappears stays on screen for the life of the
+	-- program, with nothing able to close it.
+	--
+	-- `close`, not `dismiss`: the fade is an animation, and the thing it would
+	-- be fading away from is already gone.
+	fn unmounted(el: Element) -> nil
+		local open: OverlayHandle? = el.data.scratch.handle as OverlayHandle
+
+		if open != nil then
+			open!.close()
+			el.data.scratch.handle = nil
+		end
+	end
+
+	-- The timing lives here rather than in a rebuild: showing a tooltip should
+	-- not cost the surrounding tree anything until it actually appears.
+	fn tick(el: Element, dt: float) -> nil
+		local hovered: boolean = el.data.hovered
+
+		-- Recovered once, up front: the handle is Tooltip's own state and so
+		-- lives in the untyped scratch, which means "is a tooltip open" and
+		-- "here is the handle to close it" have to be the same question
+		-- rather than two independent reads of the same slot.
+		local open: OverlayHandle? = el.data.scratch.handle as OverlayHandle
+		local shown: boolean = open != nil
+
+		if not hovered then
+			el.data.scratch.waited = 0.0
+
+			if shown then
+				-- Let it fade; the layer removes itself once it has. The slot is
+				-- cleared straight away so hovering back sooner than the fade
+				-- takes builds a fresh tooltip rather than waiting on this one.
+				open!.dismiss()
+				el.data.scratch.handle = nil
+			end
+
+			return
+		end
+
+		if shown then
+			return
+		end
+
+		local waited: float = el.data.scratch.waited as float ?? 0.0
+
+		waited = waited + dt
+		el.data.scratch.waited = waited
+
+		if waited < self.delay then
+			return
+		end
+
+		local owner: BuildOwner? = el.owner
+
+		if owner == nil or #self.message == 0 then
+			return
+		end
+
+		el.data.scratch.handle = self.show(owner!, el)
+	end
+
+	local fn show(owner: BuildOwner, el: Element) -> OverlayHandle
+		local overlay: OverlayRegistry = owner.overlay()
+		local message: string = self.message
+		local pointerX: float = el.data.scratch.pointerX as float ?? 0.0
+		local pointerY: float = el.data.scratch.pointerY as float ?? 0.0
+
+		-- Placeholder first, so the builder below can close over the handle it
+		-- needs for the fade — the same knot `showDialog` and `showMenu` untie.
+		local entry: OverlayEntry = OverlayEntry() do
+			return Frame()
+		end
+
+		local handle: OverlayHandle = OverlayHandle(overlay, entry)
+
+		entry.builder = fn()
+			local windowWidth: integer, windowHeight: integer = Window.getSize()
+
+			-- Offset from the cursor, then nudged back on screen. The width is
+			-- estimated from the message rather than measured — a tooltip is
+			-- never load-bearing enough to justify a layout pass to place it.
+			local estimated: float = ((#message) as float) * 7.0 + 20.0
+			local left: float = atMost(pointerX + 14.0, (windowWidth as float) - estimated - 8.0)
+			local top: float = atMost(pointerY + 20.0, (windowHeight as float) - 34.0)
+
+			return ZStack(
+				children: {
+					Positioned(
+						left: atLeastZero(left),
+						top: atLeastZero(top),
+						child: OverlayMotion(
+							handle: handle,
+							rise: 5.0,
+							child: Box(
+								color: Colors.black.withAlpha(0.85),
+								radius: 4.0,
+								padding: EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+								child: Text(message, style: TextStyle(color: Colors.white))
+							)
+						)
+					),
+				}
+			)
+		end
+
+		overlay.insert(entry)
+
+		return handle
+	end
+end

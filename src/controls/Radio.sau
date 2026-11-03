@@ -1,0 +1,165 @@
+import * from shine
+import * from core.Geometry
+import * from core.Color
+import * from core.TextStyle
+import * from core.ThemeData
+import * from core.Input
+import * from framework.Framework
+import * from Theme
+import * from animation.Animation
+import * from controls.Activatable
+import * from core.Tween
+import * from framework.Diagnostics
+
+-- ============================================================================
+-- Radio button
+-- ============================================================================
+--
+-- Reports the new group value rather than holding it: the owner decides which
+-- member of a group is selected.
+
+-- One option out of several. `Radio` compares `value` with `groupValue`; the
+-- one that matches is the selected one, and `onChanged` reports the value that
+-- was picked.
+export class Radio extends View
+	value: string
+	groupValue: string
+	label: string
+	onChanged: (fn(string) -> nil)?
+	enabled: boolean
+	autofocus: boolean
+
+	fn init(
+		value: string = "",
+		groupValue: string = "",
+		label: string = "",
+		onChanged: (fn(string) -> nil)? = nil,
+		enabled: boolean = true,
+		autofocus: boolean = false,
+		key: string? = nil
+	)
+		self.super(key)
+
+		self.value = value
+		self.groupValue = groupValue
+		self.label = label
+		self.onChanged = onChanged
+		self.enabled = enabled
+		self.autofocus = autofocus
+	end
+
+	local fn select() -> nil
+		local changed: (fn(string) -> nil)? = self.onChanged
+
+		if changed != nil and self.enabled then
+			changed(self.value)
+		end
+	end
+
+	fn body(context: BuildContext) -> View
+		return Activatable(
+			label: self.label,
+			enabled: self.enabled,
+			autofocus: self.autofocus,
+			onActivate: fn()
+				self.select()
+			end
+		) do (hovered: boolean, focused: boolean, theme: ThemeData)
+			return RadioDot(
+				selected: self.value == self.groupValue,
+				enabled: self.enabled,
+				hovered: hovered,
+				focused: focused,
+				theme: theme
+			)
+		end
+	end
+end
+
+export class RadioDot extends View
+	selected: boolean
+	enabled: boolean
+	hovered: boolean
+	focused: boolean
+	theme: ThemeData
+	side: float
+
+	fn init(
+		selected: boolean = false,
+		enabled: boolean = true,
+		hovered: boolean = false,
+		focused: boolean = false,
+		theme: ThemeData? = nil,
+		side: float = 18.0,
+		key: string? = nil
+	)
+		self.super(key)
+
+		self.selected = selected
+		self.enabled = enabled
+		self.hovered = hovered
+		self.focused = focused
+		self.theme = theme ?? ThemeData()
+		self.side = side
+	end
+
+	fn layout(el: Element, constraints: Constraints) -> Size
+		return constraints.constrain(Size(self.side, self.side))
+	end
+
+	fn tick(el: Element, dt: float) -> nil
+		local bag: table = el.data.scratch
+		local dot: AnimationController = motionOn(bag, "dot", self.selected, 0.18, EasingTypes.OutCubic)
+		local glow: AnimationController = motionOn(bag, "glow", self.hovered, 0.14)
+		local ring: AnimationController = motionOn(bag, "ring", self.focused, 0.12)
+
+		local moved: boolean = dot.step(dt)
+
+		if glow.step(dt) then
+			moved = true
+		end
+
+		if ring.step(dt) then
+			moved = true
+		end
+
+		if moved then
+			Repaint.request()
+		end
+	end
+
+	fn paint(el: Element, x: float, y: float) -> nil
+		local radius: float = el.size.width / 2.0
+		local centreX: float = x + radius
+		local centreY: float = y + radius
+		local bag: table = el.data.scratch
+
+		local picked: float = motionOn(bag, "dot", self.selected, 0.18, EasingTypes.OutCubic).value
+		local lit: float = motionOn(bag, "glow", self.hovered, 0.14).value
+		local ringAt: float = motionOn(bag, "ring", self.focused, 0.12).value
+
+		local edge: Color = self.theme.border.lerp(self.theme.primary, atLeast(picked, lit))
+
+		if not self.enabled then
+			edge = self.theme.border.withAlpha(0.5)
+		end
+
+		self.theme.surface.apply()
+		Graphics.circle("fill", centreX, centreY, radius)
+
+		edge.apply()
+		Graphics.setLineWidth(1.0)
+		Graphics.circle("line", centreX, centreY, radius)
+
+		-- The dot grows out of the middle rather than appearing at full size.
+		if picked > 0.0 then
+			self.theme.primary.apply()
+			Graphics.circle("fill", centreX, centreY, radius * 0.5 * picked)
+		end
+
+		if ringAt > 0.0 then
+			self.theme.text.withAlpha(ringAt).apply()
+			Graphics.circle("line", centreX, centreY, radius + 3.0)
+		end
+	end
+end

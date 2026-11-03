@@ -1,0 +1,130 @@
+import * from shine
+
+-- ============================================================================
+-- Input events
+-- ============================================================================
+--
+-- The pointer and keyboard events the engine produces, as values. Nothing
+-- here knows the view tree exists: `View.handleEvent` and `View.handleKey`
+-- take these, which is why they sit below the framework rather than inside it.
+
+-- ----------------------------------------------------------------------------
+-- Pointer input
+-- ----------------------------------------------------------------------------
+
+export enum PointerKind
+	Down,
+	Up,
+	Move,
+
+	-- The wheel turned. Routed like a press — to the front-most view under
+	-- the cursor, which lets nested scroll views work — and `scrollX` /
+	-- `scrollY` carry the movement.
+	Scroll
+end
+
+export class PointerEvent
+	kind: PointerKind
+
+	-- Window coordinates. Each element converts these to its own local space
+	-- before handing them to the view.
+	x: float
+	y: float
+
+	-- Wheel movement for a `Scroll` event, zero otherwise. Positive `scrollY`
+	-- is a scroll up, away from the user.
+	scrollX: float
+	scrollY: float
+
+	-- Which button a `Down` or `Up` belongs to: 1 left, 2 right, 3 middle.
+	-- `Move` and `Scroll` carry 0 — they belong to no button.
+	button: integer
+
+	fn init(
+		kind: PointerKind,
+		x: float,
+		y: float,
+		scrollX: float = 0.0,
+		scrollY: float = 0.0,
+		button: integer = 1
+	)
+		self.kind = kind
+		self.x = x
+		self.y = y
+		self.scrollX = scrollX
+		self.scrollY = scrollY
+		self.button = button
+	end
+
+	-- The two the UI cares about. Middle-click is delivered but unnamed.
+	fn isPrimary() -> boolean
+		return self.button == 1
+	end
+
+	fn isSecondary() -> boolean
+		return self.button == 2
+	end
+end
+
+-- ----------------------------------------------------------------------------
+-- Keyboard input
+-- ----------------------------------------------------------------------------
+
+export enum KeyEventKind
+
+	-- A key went down. Repeats arrive as further `Down` events while the key
+	-- is held, provided `runApp` enabled key repeat.
+	Down,
+	Up,
+
+	-- Text was typed. This is layout- and modifier-aware, so shift+a arrives
+	-- as "A" — never assemble text out of `Down` events.
+	Text
+end
+
+export class KeyEvent
+	kind: KeyEventKind
+
+	-- Engine key name ("a", "backspace", "left", …). Empty for `Text`.
+	key: string
+
+	-- The characters typed. Empty for `Down` and `Up`.
+	text: string
+
+	shift: boolean
+	ctrl: boolean
+	alt: boolean
+
+	-- The Command / Windows / Super key.
+	meta: boolean
+
+	fn init(
+		kind: KeyEventKind,
+		key: string = "",
+		text: string = "",
+		shift: boolean = false,
+		ctrl: boolean = false,
+		alt: boolean = false,
+		meta: boolean = false
+	)
+		self.kind = kind
+		self.key = key
+		self.text = text
+		self.shift = shift
+		self.ctrl = ctrl
+		self.alt = alt
+		self.meta = meta
+	end
+
+	-- "The shortcut modifier", whichever one this platform uses: Command on
+	-- macOS, Control everywhere else.
+	--
+	-- Every editing shortcut asks this rather than `ctrl`, because asking
+	-- `ctrl` directly means copy and paste do not exist on a Mac: Cmd+C never
+	-- sets `ctrl`, and Ctrl+C is not what anyone presses there. Both are
+	-- accepted — a shortcut that still works when you guess wrong is not a bug
+	-- worth fixing.
+	fn command() -> boolean
+		return self.ctrl or self.meta
+	end
+end

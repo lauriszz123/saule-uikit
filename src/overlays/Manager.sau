@@ -1,0 +1,304 @@
+import * from shine
+import * from core.Geometry
+import * from framework.Framework
+import * from core.Input
+
+-- ============================================================================
+-- The overlay implementation
+-- ============================================================================
+--
+-- A view can only draw inside the box its parent gave it. Anything that has
+-- to escape that — a dialog, a picker's list, a tooltip — goes in the overlay:
+-- a list of layers held at the root of the tree, painted above everything and
+-- hit-tested before it.
+--
+-- This file implements `OverlayRegistry` and `RouteStack`, which
+-- `framework/Framework.sau` declares and `BuildOwner` calls through. It lives
+-- above the kernel so the kernel does not have to name the two views below,
+-- and installs itself on import — the same inversion `Modifiers.sau` uses.
+
+export class OverlaySlot extends SingleChildView
+	-- See `OverlayEntry.opaque`.
+	opaque: boolean
+
+	fn init(child: View? = nil, key: string? = nil, opaque: boolean = false)
+		self.super(child, key)
+
+		self.opaque = opaque
+	end
+
+	-- Focus is confined to an opaque layer, so Tab cannot walk into the screen
+	-- behind it. Not a tab stop itself — it is a container, and traversal
+	-- parking on it would land focus on nothing visible.
+	fn focusData() -> FocusData?
+		if not self.opaque then
+			return nil
+		end
+
+		return FocusData(nil, false, false, false, false, true)
+	end
+
+	-- The layer's own views are dispatched first, so anything arriving here
+	-- landed on a blank part of *this* layer. Absorb it rather than letting it
+	-- fall through to the screen below.
+	--
+	-- `Move` and `Up` deliberately pass through: both are broadcast to the
+	-- whole tree, and that broadcast is how a view under here learns the
+	-- pointer left it. Swallowing them would strand it mid-hover. This is the
+	-- same split `ModalBarrier` makes.
+	fn handleEvent(el: Element, event: PointerEvent, x: float, y: float, inside: boolean) -> boolean
+		if not self.opaque or not inside then
+			return false
+		end
+
+		return event.kind == PointerKind.Down or event.kind == PointerKind.Scroll
+	end
+end
+
+-- The overlay's entry list, owned by [`BuildOwner`].
+--
+--     local entry: OverlayEntry = OverlayEntry(fn()
+--         return Center(child: myDialog)
+--     end)
+--     owner.overlay().insert(entry)
+--     ...
+--     owner.overlay().remove(entry)
+--
+-- Reach it from a view with `context.owner()?.overlay()`.
+export class OverlayManager implements OverlayRegistry
+	local entries: table<OverlayEntry>
+	local host: Element?
+	local dirty: boolean
+
+	fn init()
+		self.entries = {}
+		self.host = nil
+		self.dirty = false
+	end
+
+	-- The host element registers itself every frame. Knowing it lets a change
+	-- mark the overlay dirty *immediately*, so a layer opened or closed midway
+	-- through a frame is on screen at the end of that same frame rather than
+	-- the next one.
+	fn attachHost(element: Element) -> nil
+		self.host = element
+
+		if self.dirty then
+			self.dirty = false
+			element.markNeedsBuild()
+		end
+	end
+
+	-- Add an entry on top of the others. Returns it, so the caller can hold on
+	-- to it for removal.
+	fn insert(entry: OverlayEntry) -> OverlayEntry
+		if self.indexOf(entry) == 0 then
+			self.entries[#self.entries + 1] = entry
+			self.notify()
+		end
+
+		return entry
+	end
+
+	fn remove(entry: OverlayEntry) -> nil
+		local at: integer = self.indexOf(entry)
+
+		if at == 0 then
+			return
+		end
+
+		Table.remove(self.entries, at)
+		self.notify()
+	end
+
+	-- Mark the host for rebuild, or remember to do it once the host appears —
+	-- an entry can be inserted before the first frame has run.
+	local fn notify() -> nil
+		local host: Element? = self.host
+
+		if host == nil then
+			self.dirty = true
+		else
+			host!.markNeedsBuild()
+		end
+	end
+
+	fn contains(entry: OverlayEntry) -> boolean
+		return self.indexOf(entry) != 0
+	end
+
+	fn clear() -> nil
+		if #self.entries == 0 then
+			return
+		end
+
+		self.entries = {}
+		self.notify()
+	end
+
+	fn count() -> integer
+		return #self.entries
+	end
+
+	fn entryAt(index: integer) -> OverlayEntry?
+		if index < 1 or index > #self.entries then
+			return nil
+		end
+
+		return self.entries[index]
+	end
+
+	-- The topmost entry, or nil when the overlay is empty.
+	fn top() -> OverlayEntry?
+		return self.entryAt(#self.entries)
+	end
+
+	-- Force the overlay to rebuild — call it when an entry's *content* changed
+	-- without the entry list changing.
+	fn markDirty() -> nil
+		self.notify()
+	end
+
+	local fn indexOf(entry: OverlayEntry) -> integer
+		local i: integer = 1
+
+		while i <= #self.entries do
+			if self.entries[i] == entry then
+				return i
+			end
+
+			i = i + 1
+		end
+
+		return 0
+	end
+end
+
+-- The root wrapper `runApp` installs: the app, then every overlay entry.
+--
+-- Order does all the work. Entries are laid out after the app, so they paint
+-- over it; `Element.dispatch` walks children back to front, so they are also
+-- hit-tested first. Nothing about painting or input needed special cases.
+export class OverlayHost extends View
+	root: View
+	overlay: OverlayRegistry
+
+	fn init(root: View, overlay: OverlayRegistry, key: string? = nil)
+		self.super(key)
+
+		self.root = root
+		self.overlay = overlay
+	end
+
+	fn childViews() -> table<View>
+		local out: table<View> = {self.root}
+		local i: integer = 1
+
+		while i <= self.overlay.count() do
+			local entry: OverlayEntry? = self.overlay.entryAt(i)
+
+			if entry != nil then
+				out[#out + 1] = OverlaySlot(entry!.content(), entry!.key(), entry!.opaque)
+			end
+
+			i = i + 1
+		end
+
+		return out
+	end
+
+	-- Re-register every frame: the element is recreated whenever the host is
+	-- rebuilt, and the manager needs the live one to mark it dirty.
+	fn tick(el: Element, dt: float) -> nil
+		self.overlay.attachHost(el)
+	end
+
+	-- Every layer gets the full window, so an entry positions its content with
+	-- `Center`, `Align`, or a `ZStack` of `Positioned` children.
+	fn layout(el: Element, constraints: Constraints) -> Size
+		local size: Size = constraints.biggest()
+		local layer: Constraints = Constraints.tight(size)
+		local i: integer = 1
+
+		while i <= el.childCount() do
+			local child: Element? = el.childAt(i)
+
+			if child != nil then
+				child!.layout(layer)
+				child!.offset = Offset.zero()
+			end
+
+			i = i + 1
+		end
+
+		return size
+	end
+end
+
+-- A stack of full-screen routes, built on the overlay.
+--
+--     owner.navigator().push(fn()
+--         return SettingsScreen()
+--     end)
+--     owner.navigator().pop()
+--
+-- A route is just an overlay entry that covers the window, so give it an opaque
+-- background unless you want the screen below showing through.
+export class Navigator implements RouteStack
+	local overlay: OverlayRegistry
+	local routes: table<OverlayEntry>
+
+	fn init(overlay: OverlayRegistry)
+		self.overlay = overlay
+		self.routes = {}
+	end
+
+	fn push(builder: fn() -> View) -> OverlayEntry
+		-- Opaque: a route covers the window, so it has to cover it for the
+		-- pointer and for focus too, not merely for paint.
+		local entry: OverlayEntry = OverlayEntry(builder, true)
+		self.routes[#self.routes + 1] = entry
+		self.overlay.insert(entry)
+
+		return entry
+	end
+
+	fn pop() -> nil
+		if #self.routes == 0 then
+			return
+		end
+
+		local top: OverlayEntry = self.routes[#self.routes]
+		Table.remove(self.routes, #self.routes)
+		self.overlay.remove(top)
+	end
+
+	-- Swap the top route without growing the stack.
+	fn replace(builder: fn() -> View) -> OverlayEntry
+		self.pop()
+
+		return self.push(builder)
+	end
+
+	fn popToRoot() -> nil
+		while #self.routes > 0 do
+			self.pop()
+		end
+	end
+
+	fn depth() -> integer
+		return #self.routes
+	end
+
+	fn canPop() -> boolean
+		return #self.routes > 0
+	end
+end
+
+-- Runs on import, before any `BuildOwner` is constructed. `UIKit/init.sau`
+-- lists the overlays layer well before `app`, which is where `runApp` builds
+-- the owner that asks for these.
+Overlays.install(
+	() => OverlayManager(),
+	(registry: OverlayRegistry) => Navigator(registry)
+)
