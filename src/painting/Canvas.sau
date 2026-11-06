@@ -1,6 +1,6 @@
-import * from shine
-import * from core.Geometry
-import * from framework.Framework
+from shine import *
+from core.Geometry import *
+from framework.Framework import *
 
 -- ============================================================================
 -- Drawing your own pixels

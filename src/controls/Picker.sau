@@ -1,19 +1,19 @@
-import * from shine
-import * from core.Geometry
-import * from core.Color
-import * from core.TextStyle
-import * from core.ThemeData
-import * from core.Input
-import * from framework.Framework
-import * from Theme
-import * from animation.Animation
-import * from controls.Support
-import * from gestures.Gesture
-import * from layout.Stacks
-import * from painting.Icon
-import * from painting.Paint
-import * from overlays.Barrier
-import * from overlays.Menu
+from shine import *
+from core.Geometry import *
+from core.Color import *
+from core.TextStyle import *
+from core.ThemeData import *
+from core.Input import *
+from framework.Framework import *
+from Theme import *
+from animation.Animation import *
+from controls.Support import *
+from gestures.Gesture import *
+from layout.Stacks import *
+from painting.Icon import *
+from painting.Paint import *
+from overlays.Barrier import *
+from overlays.Menu import *
 
 -- ============================================================================
 -- Picker

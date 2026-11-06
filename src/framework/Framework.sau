@@ -1,11 +1,11 @@
-import * from shine
-import * from core.Geometry
-import * from core.Color
-import * from core.ThemeData
-import * from core.Events
-import * from core.Input
-import * from core.ZStackData
-import * from framework.Diagnostics
+from shine import *
+from core.Geometry import *
+from core.Color import *
+from core.ThemeData import *
+from core.Events import *
+from core.Input import *
+from core.ZStackData import *
+from framework.Diagnostics import *
 
 -- ============================================================================
 -- The view framework

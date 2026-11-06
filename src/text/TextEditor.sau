@@ -1,18 +1,18 @@
-import * from shine
-import * from core.Geometry
-import * from core.Color
-import * from core.TextStyle
-import * from framework.Framework
-import * from painting.Paint
-import * from gestures.Gesture
-import * from core.ThemeData
-import * from Theme
-import * from text.TextField
-import * from core.Tween
-import * from animation.Animation
-import * from core.Input
-import * from text.TextEngine
-import * from text.LineMap
+from shine import *
+from core.Geometry import *
+from core.Color import *
+from core.TextStyle import *
+from framework.Framework import *
+from painting.Paint import *
+from gestures.Gesture import *
+from core.ThemeData import *
+from Theme import *
+from text.TextField import *
+from core.Tween import *
+from animation.Animation import *
+from core.Input import *
+from text.TextEngine import *
+from text.LineMap import *
 
 -- Draws multi-line text, a selection that spans lines, and a caret.
 export class EditableParagraph extends View

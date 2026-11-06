@@ -1,7 +1,7 @@
-import * from shine
-import * from core.Geometry
-import * from core.ZStackData
-import * from framework.Framework
+from shine import *
+from core.Geometry import *
+from core.ZStackData import *
+from framework.Framework import *
 
 -- ============================================================================
 -- Overlap layout

@@ -3,7 +3,7 @@
 A declarative, SwiftUI-flavoured view toolkit for Saule.
 
 ```saule
-import * from UIKit
+from UIKit import *
 
 -- 1. The entry point of your app
 export class CounterApp extends App

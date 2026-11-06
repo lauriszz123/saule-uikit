@@ -1,15 +1,15 @@
-import * from shine
-import * from core.Geometry
-import * from core.Color
-import * from core.TextStyle
-import * from core.ThemeData
-import * from core.Input
-import * from framework.Framework
-import * from Theme
-import * from animation.Animation
-import * from core.Tween
-import * from layout.Boxes
-import * from overlays.Manager
+from shine import *
+from core.Geometry import *
+from core.Color import *
+from core.TextStyle import *
+from core.ThemeData import *
+from core.Input import *
+from framework.Framework import *
+from Theme import *
+from animation.Animation import *
+from core.Tween import *
+from layout.Boxes import *
+from overlays.Manager import *
 
 -- ============================================================================
 -- Modal barrier and layer handles

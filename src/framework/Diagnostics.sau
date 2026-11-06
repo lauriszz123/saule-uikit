@@ -1,4 +1,4 @@
-import * from shine
+from shine import *
 
 -- ============================================================================
 -- Frame diagnostics and the cursor request

@@ -1,6 +1,6 @@
-import * from core.Geometry
-import * from core.Color
-import * from core.TextStyle
+from core.Geometry import *
+from core.Color import *
+from core.TextStyle import *
 
 -- ============================================================================
 -- Theme data

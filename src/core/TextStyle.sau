@@ -1,6 +1,6 @@
-import * from shine
-import * from core.Color
-import * from core.Geometry
+from shine import *
+from core.Color import *
+from core.Geometry import *
 
 -- Split on a single-character separator. `String.find` gives the next
 -- occurrence; everything between the cursors is one piece, including empty

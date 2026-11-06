@@ -1,13 +1,13 @@
-import * from shine
-import * from core.Color
-import * from core.TextStyle
-import * from core.ThemeData
-import * from core.Input
-import * from framework.Framework
-import * from gestures.Gesture
-import * from layout.Stacks
-import * from painting.Paint
-import * from Theme
+from shine import *
+from core.Color import *
+from core.TextStyle import *
+from core.ThemeData import *
+from core.Input import *
+from framework.Framework import *
+from gestures.Gesture import *
+from layout.Stacks import *
+from painting.Paint import *
+from Theme import *
 
 -- ============================================================================
 -- The activatable control

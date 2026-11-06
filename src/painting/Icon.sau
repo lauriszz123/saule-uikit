@@ -1,14 +1,14 @@
-import * from shine
-import * from core.Assets
-import * from core.Geometry
-import * from core.Color
-import * from core.TextStyle
-import * from framework.Framework
-import * from painting.Paint
-import * from gestures.Gesture
-import * from core.ThemeData
-import * from Theme
-import * from core.Input
+from shine import *
+from core.Assets import *
+from core.Geometry import *
+from core.Color import *
+from core.TextStyle import *
+from framework.Framework import *
+from painting.Paint import *
+from gestures.Gesture import *
+from core.ThemeData import *
+from Theme import *
+from core.Input import *
 
 -- ============================================================================
 -- Icons

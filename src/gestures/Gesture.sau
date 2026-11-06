@@ -1,9 +1,9 @@
-import * from shine
-import * from core.Geometry
-import * from framework.Framework
-import * from core.Input
-import * from framework.Diagnostics
-import * from painting.Paint
+from shine import *
+from core.Geometry import *
+from framework.Framework import *
+from core.Input import *
+from framework.Diagnostics import *
+from painting.Paint import *
 
 -- ============================================================================
 -- Input

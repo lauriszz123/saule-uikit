@@ -1,7 +1,7 @@
-import * from shine
-import * from core.Geometry
-import * from framework.Framework
-import * from core.Input
+from shine import *
+from core.Geometry import *
+from framework.Framework import *
+from core.Input import *
 
 -- ============================================================================
 -- The overlay implementation

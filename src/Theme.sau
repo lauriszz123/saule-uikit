@@ -1,9 +1,9 @@
-import * from core.Geometry
-import * from core.Color
-import * from core.TextStyle
-import * from core.ThemeData
-import * from framework.Framework
-import * from layout.Boxes
+from core.Geometry import *
+from core.Color import *
+from core.TextStyle import *
+from core.ThemeData import *
+from framework.Framework import *
+from layout.Boxes import *
 
 -- ============================================================================
 -- Theme

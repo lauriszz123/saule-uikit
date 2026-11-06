@@ -1,8 +1,8 @@
-import * from core.Geometry
-import * from core.Color
-import * from framework.Framework
-import * from core.Tween
-import * from framework.Diagnostics
+from core.Geometry import *
+from core.Color import *
+from framework.Framework import *
+from core.Tween import *
+from framework.Diagnostics import *
 
 -- ============================================================================
 -- Animation

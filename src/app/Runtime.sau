@@ -1,12 +1,12 @@
-import * from shine
-import * from core.Geometry
-import * from core.Color
-import * from core.Events
-import * from core.Input
-import * from framework.Framework
-import * from framework.Diagnostics
-import * from painting.Paint
-import * from overlays.Manager
+from shine import *
+from core.Geometry import *
+from core.Color import *
+from core.Events import *
+from core.Input import *
+from framework.Framework import *
+from framework.Diagnostics import *
+from painting.Paint import *
+from overlays.Manager import *
 
 -- ============================================================================
 -- The frame loop

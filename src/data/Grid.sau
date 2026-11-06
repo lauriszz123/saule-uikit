@@ -1,13 +1,13 @@
-import * from shine
-import * from core.Geometry
-import * from core.Color
-import * from core.TextStyle
-import * from core.ThemeData
-import * from core.Input
-import * from framework.Framework
-import * from Theme
-import * from layout.Boxes
-import * from layout.Stacks
+from shine import *
+from core.Geometry import *
+from core.Color import *
+from core.TextStyle import *
+from core.ThemeData import *
+from core.Input import *
+from framework.Framework import *
+from Theme import *
+from layout.Boxes import *
+from layout.Stacks import *
 
 -- ============================================================================
 -- Grid

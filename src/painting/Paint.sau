@@ -1,9 +1,9 @@
-import * from shine
-import * from core.Geometry
-import * from core.Color
-import * from core.TextStyle
-import * from framework.Framework
-import * from layout.Boxes
+from shine import *
+from core.Geometry import *
+from core.Color import *
+from core.TextStyle import *
+from framework.Framework import *
+from layout.Boxes import *
 
 -- ============================================================================
 -- Painted views

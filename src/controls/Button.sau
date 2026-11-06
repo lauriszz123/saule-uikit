@@ -1,12 +1,12 @@
-import * from core.Geometry
-import * from core.Color
-import * from core.TextStyle
-import * from framework.Framework
-import * from painting.Paint
-import * from gestures.Gesture
-import * from core.Tween
-import * from animation.Animation
-import * from core.Input
+from core.Geometry import *
+from core.Color import *
+from core.TextStyle import *
+from framework.Framework import *
+from painting.Paint import *
+from gestures.Gesture import *
+from core.Tween import *
+from animation.Animation import *
+from core.Input import *
 
 -- A labelled, clickable box.
 --

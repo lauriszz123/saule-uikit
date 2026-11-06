@@ -1,16 +1,16 @@
-import * from shine
-import * from core.Geometry
-import * from core.Color
-import * from core.TextStyle
-import * from core.ThemeData
-import * from core.Input
-import * from framework.Framework
-import * from Theme
-import * from gestures.Gesture
-import * from layout.Boxes
-import * from layout.Stacks
-import * from painting.Icon
-import * from painting.Paint
+from shine import *
+from core.Geometry import *
+from core.Color import *
+from core.TextStyle import *
+from core.ThemeData import *
+from core.Input import *
+from framework.Framework import *
+from Theme import *
+from gestures.Gesture import *
+from layout.Boxes import *
+from layout.Stacks import *
+from painting.Icon import *
+from painting.Paint import *
 
 -- ============================================================================
 -- Table

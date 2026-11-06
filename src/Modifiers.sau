@@ -1,11 +1,11 @@
-import * from core.Geometry
-import * from core.Color
-import * from framework.Framework
-import * from painting.Paint
-import * from gestures.Gesture
-import * from layout.Boxes
-import * from layout.Stacks
-import * from overlays.Tooltip
+from core.Geometry import *
+from core.Color import *
+from framework.Framework import *
+from painting.Paint import *
+from gestures.Gesture import *
+from layout.Boxes import *
+from layout.Stacks import *
+from overlays.Tooltip import *
 
 -- ============================================================================
 -- The modifier implementation

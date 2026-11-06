@@ -1,15 +1,15 @@
-import * from shine
-import * from core.Geometry
-import * from core.Color
-import * from core.TextStyle
-import * from framework.Framework
-import * from painting.Paint
-import * from gestures.Gesture
-import * from core.Tween
-import * from animation.Animation
-import * from core.Input
-import * from framework.Diagnostics
-import * from text.TextEngine
+from shine import *
+from core.Geometry import *
+from core.Color import *
+from core.TextStyle import *
+from framework.Framework import *
+from painting.Paint import *
+from gestures.Gesture import *
+from core.Tween import *
+from animation.Animation import *
+from core.Input import *
+from framework.Diagnostics import *
+from text.TextEngine import *
 
 -- ============================================================================
 -- Text editing

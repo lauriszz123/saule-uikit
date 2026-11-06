@@ -1,8 +1,8 @@
-import * from shine
-import * from core.Assets
-import * from core.Geometry
-import * from core.Color
-import * from framework.Framework
+from shine import *
+from core.Assets import *
+from core.Geometry import *
+from core.Color import *
+from framework.Framework import *
 
 -- ============================================================================
 -- Images and sprites
