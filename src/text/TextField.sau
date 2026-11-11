@@ -1,4 +1,4 @@
-from shine import *
+from shine import Graphics, Timer
 from core.Geometry import *
 from core.Color import *
 from core.TextStyle import *

@@ -1,4 +1,4 @@
-from shine import *
+from painting.Images import *
 from core.Assets import *
 from core.Geometry import *
 from core.Color import *
@@ -7,80 +7,6 @@ from framework.Framework import *
 -- ============================================================================
 -- Images and sprites
 -- ============================================================================
-
--- Loads PNGs once and hands back engine handles.
---
--- Decoding is not cheap and a view's `layout` runs every frame, so the cache
--- is what makes `Image(path: "icon.png")` safe to write inside a `body`.
--- Handles are process-wide, matching the engine's own registry.
-export class Images
-	static local handles: table = {}
-	static local failed: table = {}
-
-	-- The handle for `path`, or nil if it could not be loaded. A failed path is
-	-- remembered so a missing file doesn't retry the decode 60 times a second.
-	--
-	-- Relative paths are read against the project root, not the working
-	-- directory — see `Assets.resolve` for why. Caching is keyed on the path as
-	-- written, since that is what a caller repeats.
-	--
-	-- `Graphics.loadImage` reports failure as nil rather than raising, which is
-	-- what makes this safe: an error raised inside a native call is fatal in
-	-- Saule and not catchable by `try`, so this used to `Io.open` the file
-	-- first purely to find out whether it existed — opening it twice, and still
-	-- racing anything that removed it in between.
-	static fn load(path: string) -> integer?
-		local cached = handles[path]
-
-		if cached != nil then
-			return cached
-		end
-
-		if failed[path] == true then
-			return nil
-		end
-
-		local resolved: string = Assets.resolve(path)
-		local handle: integer? = Graphics.loadImage(resolved)
-
-		if handle == nil then
-			failed[path] = true
-			println("Images.load: cannot load " .. resolved)
-
-			return nil
-		end
-
-		handles[path] = handle!
-
-		return handle
-	end
-
-	static fn size(path: string) -> Size
-		local handle: integer? = Images.load(path)
-
-		if handle == nil then
-			return Size.zero()
-		end
-
-		local width: integer, height: integer = Graphics.imageSize(handle!)
-
-		return Size(width as float, height as float)
-	end
-
-	-- Drop the cache: call it if assets changed on disk and you want a reload.
-	--
-	-- Each handle is released, not just forgotten. Dropping the table alone
-	-- used to leave every decoded image resident for the life of the process,
-	-- because nothing could free one.
-	static fn clear() -> nil
-		for path: string, handle: integer in Images.handles do
-			Graphics.release(handle)
-		end
-
-		Images.handles = {}
-		Images.failed = {}
-	end
-end
 
 -- How an image fills a box that isn't its natural shape.
 export enum ContentMode
@@ -183,9 +109,7 @@ export class Image extends View
 	end
 
 	fn paint(el: Element, x: float, y: float) -> nil
-		local handle: integer? = Images.load(self.path)
-
-		if handle == nil then
+		if not Images.has(self.path) then
 			return
 		end
 
@@ -220,23 +144,6 @@ export class Image extends View
 		local tint: Color = self.color ?? Colors.white
 		tint.apply()
 
-		local frame: Rect? = self.frame
-
-		if frame == nil then
-			Graphics.draw(handle!, left, top, 0.0, scaleX, scaleY)
-		else
-			Graphics.drawFrame(
-				handle!,
-				frame!.x,
-				frame!.y,
-				frame!.width,
-				frame!.height,
-				left,
-				top,
-				0.0,
-				scaleX,
-				scaleY
-			)
-		end
+		Images.draw(self.path, left, top, scaleX, scaleY, self.frame)
 	end
 end

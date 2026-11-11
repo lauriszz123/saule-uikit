@@ -1,4 +1,3 @@
-from shine import *
 from core.Geometry import *
 from framework.Framework import *
 from layout.Boxes import *

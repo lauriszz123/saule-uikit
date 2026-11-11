@@ -1,4 +1,4 @@
-from shine import *
+from shine import Mouse, Timer
 
 -- ============================================================================
 -- Frame diagnostics and the cursor request

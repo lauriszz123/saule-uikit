@@ -1,4 +1,4 @@
-from shine import *
+from shine import Graphics, Canvas
 from core.Geometry import *
 from core.Color import *
 from core.TextStyle import *
@@ -384,7 +384,7 @@ export class Opacity extends SingleChildView
 			return
 		end
 
-		local canvas: integer = self.canvasFor(el, width, height)
+		local canvas: Canvas = self.canvasFor(el, width, height)
 
 		-- Render the subtree into the canvas at its origin: the children paint
 		-- in window coordinates, so the transform shifts them back to 0,0.
@@ -409,22 +409,14 @@ export class Opacity extends SingleChildView
 		Graphics.setColor(1.0, 1.0, 1.0, 1.0)
 	end
 
-	-- One canvas per element, reallocated only when the size changes.
-	--
-	-- The old canvas is released before the new one is allocated. This used to
-	-- leak it — the engine had no way to free a canvas at all — so a subtree
-	-- that faded while resizing grew the process by its full pixel buffer on
-	-- every size change.
-	local fn canvasFor(el: Element, width: integer, height: integer) -> integer
+	-- One canvas per element, reallocated only when the size changes. The
+	-- one it replaces is freed by the engine once nothing holds it.
+	local fn canvasFor(el: Element, width: integer, height: integer) -> Canvas
 		local signature: string = width .. "x" .. height
-		local cached: integer? = el.data.scratch.canvas as integer
+		local cached: Canvas? = el.data.scratch.canvas as Canvas
 
 		if el.data.scratch.canvasKey != signature or cached == nil then
-			if cached != nil then
-				Graphics.release(cached!)
-			end
-
-			local made: integer = Graphics.newCanvas(width, height)
+			local made: Canvas = Graphics.newCanvas(width, height)
 
 			el.data.scratch.canvasKey = signature
 			el.data.scratch.canvas = made

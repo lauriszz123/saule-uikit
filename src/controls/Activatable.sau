@@ -1,4 +1,3 @@
-from shine import *
 from core.Color import *
 from core.TextStyle import *
 from core.ThemeData import *

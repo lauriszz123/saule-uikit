@@ -1,4 +1,4 @@
-from shine import *
+from shine import Graphics, Font
 from core.Assets import *
 from core.Geometry import *
 from core.Color import *
@@ -36,7 +36,7 @@ from core.Input import *
 -- `setFontPath` before the first icon is drawn.
 export class IconFont
 	static local path: string = "assets/MaterialIcons-Regular.ttf"
-	static local handles: table = {}
+	static local handles: table<string, Font> = {}
 	static local missing: boolean = false
 
 	static fn setFontPath(path: string) -> nil
@@ -49,7 +49,7 @@ export class IconFont
 	--
 	-- Sizes are cached because a handle is a rasterized atlas: asking for one
 	-- per frame would rebuild it per frame.
-	static fn handleFor(size: float) -> integer?
+	static fn handleFor(size: float) -> Font?
 		if IconFont.missing then
 			return nil
 		end
@@ -68,7 +68,7 @@ export class IconFont
 		-- program. It also replaces the `Io.open` probe this used to need,
 		-- which opened the file an extra time and still raced a delete.
 		local resolved: string = Assets.resolve(IconFont.path)
-		local created: integer? = Graphics.loadFont(size * Display.scale(), resolved)
+		local created: Font? = Graphics.loadFont(size * Display.scale(), resolved)
 
 		if created == nil then
 			IconFont.missing = true
@@ -108,7 +108,7 @@ export class Icon extends View
 	end
 
 	fn paint(el: Element, x: float, y: float) -> nil
-		local handle: integer? = IconFont.handleFor(self.size)
+		local handle: Font? = IconFont.handleFor(self.size)
 
 		if handle == nil or self.codepoint == 0 then
 			return
@@ -117,7 +117,7 @@ export class Icon extends View
 		-- Fonts are global state, so the icon face has to be put back when we
 		-- are done with it. Otherwise the next thing to draw text without
 		-- binding its own font renders in icon glyphs.
-		local previous: integer = Graphics.getFont()
+		local previous: Font = Graphics.getFont()
 		Graphics.setFont(handle!)
 
 		local tint: Color = self.color ?? Colors.text

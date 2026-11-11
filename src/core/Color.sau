@@ -1,4 +1,4 @@
-from shine import *
+from shine import Graphics
 
 export class Color
 	r: float

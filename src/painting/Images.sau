@@ -1,0 +1,103 @@
+from shine import Graphics, Image, Quad
+from core.Assets import *
+from core.Geometry import *
+
+-- ============================================================================
+-- The image cache
+-- ============================================================================
+--
+-- A module of its own because of a name: the engine's loaded picture is
+-- called `Image`, and so is the view that shows one (`painting/Image.sau`).
+-- Kept apart, each module sees exactly one `Image`, and the view reaches
+-- pictures only through what `Images` offers.
+
+-- Loads PNGs once and hands back the engine's images.
+--
+-- Decoding is not cheap and a view's `layout` runs every frame, so the cache
+-- is what makes `Image(path: "icon.png")` safe to write inside a `body`.
+-- They are process-wide, matching the engine's own registry.
+export class Images
+	static local handles: table<string, Image> = {}
+	static local failed: table = {}
+
+	-- The image at `path`, or nil if it could not be loaded. A failed path is
+	-- remembered so a missing file doesn't retry the decode 60 times a second.
+	--
+	-- Relative paths are read against the project root, not the working
+	-- directory — see `Assets.resolve` for why. Caching is keyed on the path as
+	-- written, since that is what a caller repeats.
+	--
+	-- `Graphics.loadImage` reports failure as nil rather than raising, which is
+	-- what makes this safe: an error raised inside a native call is fatal in
+	-- Saule and not catchable by `try`, so this used to `Io.open` the file
+	-- first purely to find out whether it existed — opening it twice, and still
+	-- racing anything that removed it in between.
+	static fn load(path: string) -> Image?
+		local cached = handles[path]
+
+		if cached != nil then
+			return cached
+		end
+
+		if failed[path] == true then
+			return nil
+		end
+
+		local resolved: string = Assets.resolve(path)
+		local handle: Image? = Graphics.loadImage(resolved)
+
+		if handle == nil then
+			failed[path] = true
+			println("Images.load: cannot load " .. resolved)
+
+			return nil
+		end
+
+		handles[path] = handle!
+
+		return handle
+	end
+
+	static fn size(path: string) -> Size
+		local handle: Image? = Images.load(path)
+
+		if handle == nil then
+			return Size.zero()
+		end
+
+		local width: integer, height: integer = handle!.getDimensions()
+
+		return Size(width as float, height as float)
+	end
+
+	-- Drop the cache: call it if assets changed on disk and you want a reload.
+	-- The engine frees each image once nothing else holds it.
+	static fn clear() -> nil
+		Images.handles = {}
+		Images.failed = {}
+	end
+
+	-- Whether `path` loads.
+	static fn has(path: string) -> boolean
+		return Images.load(path) != nil
+	end
+
+	-- Draw the picture at `path`, scaled, with its top-left at `x, y`. With a
+	-- `frame`, only that rectangle of it — one cell of a sprite sheet.
+	static fn draw(path: string, x: float, y: float, sx: float, sy: float, frame: Rect? = nil) -> nil
+		local picture: Image? = Images.load(path)
+
+		if picture == nil then
+			return
+		end
+
+		if frame == nil then
+			Graphics.draw(picture!, x, y, 0.0, sx, sy)
+			return
+		end
+
+		local w: integer, h: integer = picture!.getDimensions()
+		local cell: Quad = Graphics.newQuad(frame!.x, frame!.y, frame!.width, frame!.height, w as float, h as float)
+		Graphics.drawq(picture!, cell, x, y, 0.0, sx, sy)
+	end
+end

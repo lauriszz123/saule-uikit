@@ -1,4 +1,4 @@
-from shine import *
+from shine import Graphics, Font
 from core.Color import *
 from core.Geometry import *
 
@@ -35,7 +35,7 @@ export class TextStyle
 	color: Color
 	size: float?
 
-	static local fonts: table = {}
+	static local fonts: table<string, Font> = {}
 
 	fn init(color: Color? = nil, size: float? = nil)
 		self.color = color ?? Colors.text
@@ -52,7 +52,7 @@ export class TextStyle
 
 	-- Bind the font this style asks for.
 	--
-	-- A style with no size binds handle 0, the engine's default face. It has to
+	-- A style with no size binds the engine's default face. It has to
 	-- bind *something*: fonts are global state, so leaving whatever the last
 	-- style set would make a view's measured size depend on the order the
 	-- tree happened to be walked in.
@@ -64,7 +64,7 @@ export class TextStyle
 			-- The default face has no size to scale, so a scaled display gets
 			-- the same glyphs magnified by the root transform. Give a size to
 			-- any text that needs to stay sharp.
-			Graphics.setFont(0)
+			Graphics.setFont()
 
 			return
 		end
@@ -77,11 +77,11 @@ export class TextStyle
 		local cached = fonts[key]
 
 		if cached == nil then
-			local created: integer = Graphics.newFont(physical)
+			local created: Font = Graphics.newFont(physical)
 			fonts[key] = created
 			Graphics.setFont(created)
 		else
-			Graphics.setFont(cached)
+			Graphics.setFont(cached!)
 		end
 	end
 

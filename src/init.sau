@@ -35,6 +35,7 @@ export from Theme import *
 -- Painting.
 export from painting.Paint import *
 export from painting.Canvas import *
+export from painting.Images import *
 export from painting.Image import *
 export from painting.Icon import *
 

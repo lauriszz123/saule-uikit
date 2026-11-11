@@ -1,4 +1,4 @@
-from shine import *
+from shine import Mouse, Timer
 from core.Geometry import *
 from framework.Framework import *
 from core.Input import *
