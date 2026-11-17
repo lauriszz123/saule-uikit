@@ -165,11 +165,17 @@ export class FocusManager
 	local scopes: table<Element?>
 	local activeScope: Element?
 
+	-- The `BuildOwner.generation` the order above was collected at. The
+	-- order is a function of the tree, and the tree only changes when
+	-- something rebuilds, so a frame with no rebuild reuses it.
+	local seenGeneration: integer
+
 	fn init()
 		self.focused = nil
 		self.order = {}
 		self.scopes = {}
 		self.activeScope = nil
+		self.seenGeneration = -1
 	end
 
 	fn focusedElement() -> Element?
@@ -184,6 +190,22 @@ export class FocusManager
 	-- have settled and before routing keys: it binds every mounted node, drops
 	-- focus that was rebuilt away, and applies `autofocus`.
 	fn refresh(root: Element) -> nil
+		-- Walking the whole tree for focusables was a fixed cost on every
+		-- frame with input — half a millisecond with a few editor windows
+		-- open, paid on every step of a drag that changes nothing focusable.
+		-- Only re-collect when the tree has been rebuilt since last time.
+		local owner: BuildOwner? = root.owner
+
+		if owner != nil and owner!.generation == self.seenGeneration then
+			self.settle()
+
+			return
+		end
+
+		if owner != nil then
+			self.seenGeneration = owner!.generation
+		end
+
 		self.order = {}
 		self.scopes = {}
 		self.collect(root, nil)
@@ -212,6 +234,13 @@ export class FocusManager
 			i = i + 1
 		end
 
+		self.settle()
+	end
+
+	-- Drop focus that has left the active scope, and apply autofocus when
+	-- nothing holds focus. Cheap, so it runs every frame whether or not the
+	-- order was re-collected.
+	local fn settle() -> nil
 		local current: Element? = self.focused
 
 		if current != nil and not self.inScope(current!) then
@@ -2002,6 +2031,11 @@ end
 
 -- Owns the root element and the list of elements waiting to rebuild.
 export class BuildOwner
+	-- Bumped whenever a flush actually rebuilt something, so per-frame work
+	-- that depends only on the tree's shape (the focus order) can tell when
+	-- it is still current.
+	generation: integer
+
 	local dirty: table<Element>
 	local root: Element?
 	local focusManager: FocusManager
@@ -2009,6 +2043,7 @@ export class BuildOwner
 	local navigatorInstance: RouteStack
 
 	fn init()
+		self.generation = 0
 		self.dirty = {}
 		self.root = nil
 		self.focusManager = FocusManager()
@@ -2034,6 +2069,7 @@ export class BuildOwner
 		local element: Element = Element(view)
 		self.root = element
 		element.mount(nil, self)
+		self.generation = self.generation + 1
 
 		return element
 	end
@@ -2066,6 +2102,7 @@ export class BuildOwner
 			for element: Element in batch do
 				if element.isMounted() and element.needsBuild() then
 					element.rebuild()
+					self.generation = self.generation + 1
 				end
 			end
 
