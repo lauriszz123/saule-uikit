@@ -52,6 +52,14 @@ export class Surface extends SingleChildView
 		end
 	end
 
+	-- A solid fill hides what is behind it, so it hides it from the pointer
+	-- too. A see-through one (a hover wash, a tint) does not.
+	fn occludes(el: Element) -> boolean
+		local fill: Color? = self.color
+
+		return fill != nil and fill!.a >= 0.99
+	end
+
 	fn paint(el: Element, x: float, y: float) -> nil
 		local fill: Color? = self.color
 

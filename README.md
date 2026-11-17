@@ -578,6 +578,17 @@ GestureArea(
 )
 ```
 
+**Opaque views hide what is behind them from the pointer.** A view whose
+`occludes(el)` answers true — a `Surface` or `Box` with a solid fill does —
+stops presses and the wheel from reaching anything *behind* it, and makes
+pointer motion read as "outside" back there. So with two overlapping panels,
+hovering the front one never lights up a button hidden under it, and
+clicking an empty part of the front one never presses something behind it.
+Ancestors still get the event (a `GestureArea` around a filled box works as
+before), and transparent layers such as toasts and tooltips block nothing.
+Override `occludes` on a render view of your own that paints an opaque
+background.
+
 Pointer events go wherever the cursor is. Key events go to whatever holds
 **focus**, and then bubble up through its ancestors until something claims them
 — so a listener wrapped around a screen sees every key the focused control

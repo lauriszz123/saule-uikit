@@ -591,6 +591,23 @@ export class View
 		return nil
 	end
 
+	-- Does this view hide what is behind it from the pointer?
+	--
+	-- An opaque view — a filled `Surface`, say — covers its siblings behind
+	-- it in paint, and should cover them for the pointer too: a press on it
+	-- must not fall through to a button underneath, and moving over it must
+	-- not light up a hover highlight that is out of sight. Answer true and
+	-- views *behind* this one (earlier siblings, and theirs) see presses and
+	-- the wheel stop here, and see pointer motion as "outside".
+	--
+	-- Ancestors are unaffected — a `GestureArea` around a filled box still
+	-- gets its press — and so is anything in front. False by default, so a
+	-- transparent layer (a toast, a tooltip, an empty `Positioned`) never
+	-- blocks what it is drawn over.
+	fn occludes(el: Element) -> boolean
+		return false
+	end
+
 	-- --- modifiers -----------------------------------------------------------
 	--
 	-- Each of these returns *a new view wrapping this one*, so they chain:
@@ -1498,6 +1515,14 @@ end
 -- One live position in the tree. Elements are created by the framework, never
 -- by user code; views receive theirs as the first argument to `layout`,
 -- `paint` and `handleEvent`.
+-- What `Element.route` reports back up the tree. Integers rather than an
+-- enum so the hot path compares numbers.
+export class Hit
+	static Missed: integer = 0
+	static Covered: integer = 1
+	static Claimed: integer = 2
+end
+
 export class Element
 	-- The view currently describing this position. Swapped on every
 	-- reconcile, so never cache it across frames.
@@ -1872,11 +1897,26 @@ export class Element
 	-- Route a pointer event. `x` / `y` are the parent's absolute origin.
 	-- Returns true when the event was claimed.
 	fn dispatch(event: PointerEvent, x: float, y: float) -> boolean
+		return self.route(event, x, y, false) == Hit.Claimed
+	end
+
+	-- The walk behind `dispatch`. Children are visited front-most first, and
+	-- the answer says how far the event got:
+	--
+	--   Hit.Claimed   something here took it; the walk is over
+	--   Hit.Covered   it landed on an opaque view here (`View.occludes`), so
+	--                 nothing *behind* this subtree may see it as its own
+	--   Hit.Missed    neither
+	--
+	-- `covered` is set for a subtree that sits behind an opaque sibling at
+	-- the pointer: it still hears motion and releases — that is how a view
+	-- learns the pointer left it — but always as "outside".
+	fn route(event: PointerEvent, x: float, y: float, covered: boolean) -> integer
 		local ax: float = x + self.offset.dx
 		local ay: float = y + self.offset.dy
 		local lx: float = event.x - ax
 		local ly: float = event.y - ay
-		local inside: boolean = lx >= 0.0 and ly >= 0.0 and lx < self.size.width and ly < self.size.height
+		local inside: boolean = not covered and lx >= 0.0 and ly >= 0.0 and lx < self.size.width and ly < self.size.height
 
 		if event.kind == PointerKind.Down or event.kind == PointerKind.Scroll then
 			-- A press or a wheel turn is a real hit test: outside means not for
@@ -1884,32 +1924,56 @@ export class Element
 			-- ordering is what makes an inner scroll view consume the wheel
 			-- before the page behind it sees it.
 			if not inside then
-				return false
+				return Hit.Missed
 			end
 
+			-- An opaque child that declined still stops the walk: the
+			-- siblings behind it are hidden, so they are not offered it.
+			local hidden: boolean = false
 			local i: integer = #self.kids
-			while i >= 1 do
-				if self.kids[i].dispatch(event, ax, ay) then
-					return true
+			while i >= 1 and not hidden do
+				local hit: integer = self.kids[i].route(event, ax, ay, false)
+
+				if hit == Hit.Claimed then
+					return Hit.Claimed
 				end
 
+				hidden = hit == Hit.Covered
 				i = i - 1
 			end
 
-			return self.view.handleEvent(self, event, lx, ly, true)
+			if self.view.handleEvent(self, event, lx, ly, true) then
+				return Hit.Claimed
+			end
+
+			if hidden or self.view.occludes(self) then
+				return Hit.Covered
+			end
+
+			return Hit.Missed
 		end
 
 		-- Move and Up reach everyone: that is how a view learns the pointer
-		-- left it, or that a press it was tracking ended somewhere else.
+		-- left it, or that a press it was tracking ended somewhere else. Once
+		-- an opaque child is under the pointer, the children behind it hear
+		-- the event as outside, so a hover never lights up out of sight.
+		local hidden: boolean = covered
 		local i: integer = #self.kids
 		while i >= 1 do
-			self.kids[i].dispatch(event, ax, ay)
+			if self.kids[i].route(event, ax, ay, hidden) == Hit.Covered then
+				hidden = true
+			end
+
 			i = i - 1
 		end
 
 		self.view.handleEvent(self, event, lx, ly, inside)
 
-		return false
+		if inside and (hidden or self.view.occludes(self)) then
+			return Hit.Covered
+		end
+
+		return Hit.Missed
 	end
 
 	-- --- debugging -----------------------------------------------------------
