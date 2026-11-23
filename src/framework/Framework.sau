@@ -586,7 +586,19 @@ export class View
 	-- This is how a *stateless* view animates: advance whatever you own and
 	-- call `el.markNeedsBuild()` on the frames where something actually changed.
 	-- A `State` has its own `tick` for the same purpose.
+	--
+	-- **Only called when `ticks()` says so.** A view that overrides this must
+	-- also override `ticks()` to return true.
 	fn tick(el: Element, dt: float) -> nil
+	end
+
+	-- Whether this view has a `tick` that needs calling. False by default,
+	-- which is what lets the frame clock skip every part of the tree with
+	-- nothing animating in it: most views are layout and painting only, and
+	-- visiting each of them every frame was most of an idle frame's cost —
+	-- growing with every window open, whether it could be seen or not.
+	fn ticks() -> boolean
+		return false
 	end
 
 	-- --- focus and keyboard --------------------------------------------------
@@ -1580,6 +1592,20 @@ export class Element
 	local lastConstraints: Constraints?
 	local staleLayout: boolean
 
+	-- The frame clock's map: how many elements in this subtree (this one
+	-- included) have a tick to run, and whether this one does. A subtree
+	-- counting zero is skipped whole. Kept current by `recount` after every
+	-- rebuild, the only place children change.
+	local tickers: integer
+	local ticksItself: boolean
+
+	-- The pointer router's map: whether this subtree has to hear the next
+	-- pointer *move* even if it lands outside — because the pointer was
+	-- inside it last time (so a hover has to end), or something in it is
+	-- pressed or dragging. A subtree the pointer is outside of and that
+	-- isn't engaged has nothing to learn from a move, and is skipped.
+	local engaged: boolean
+
 	fn init(view: View)
 		self.view = view
 		self.parent = nil
@@ -1594,6 +1620,9 @@ export class Element
 		self.mounted = false
 		self.lastConstraints = nil
 		self.staleLayout = true
+		self.tickers = 0
+		self.ticksItself = false
+		self.engaged = false
 	end
 
 	-- --- lifecycle -----------------------------------------------------------
@@ -1723,6 +1752,39 @@ export class Element
 
 		self.dirty = false
 		self.kids = Element.reconcile(self, self.kids, self.describeChildren(), self.owner)
+		self.recount()
+	end
+
+	-- Bring `tickers` up to date after this element's view or children
+	-- changed, and carry the difference up to every ancestor, so each count
+	-- stays the sum of its subtree.
+	--
+	-- A `State` counts as ticking whatever it does: there are few of them,
+	-- and a state's `tick` has no `ticks()` to ask.
+	local fn recount() -> nil
+		self.ticksItself = self.state != nil or self.view.ticks()
+
+		local count: integer = 0
+		if self.ticksItself then
+			count = 1
+		end
+
+		for child: Element in self.kids do
+			count = count + child.tickers
+		end
+
+		local delta: integer = count - self.tickers
+		if delta == 0 then
+			return
+		end
+
+		self.tickers = count
+
+		local node: Element? = self.parent
+		while node != nil do
+			node!.tickers = node!.tickers + delta
+			node = node!.parent
+		end
 	end
 
 	local fn describeChildren() -> table<View>
@@ -1910,16 +1972,22 @@ export class Element
 		end
 	end
 
+	-- Run the ticks in this subtree. Only the paths down to something that
+	-- ticks are walked; see `tickers`.
 	fn tick(dt: float) -> nil
-		self.view.tick(self, dt)
+		if self.ticksItself then
+			self.view.tick(self, dt)
 
-		local s: State? = self.state
-		if s != nil then
-			s.tick(dt)
+			local s: State? = self.state
+			if s != nil then
+				s.tick(dt)
+			end
 		end
 
 		for child: Element in self.kids do
-			child.tick(dt)
+			if child.tickers > 0 then
+				child.tick(dt)
+			end
 		end
 	end
 
@@ -1946,6 +2014,12 @@ export class Element
 		local lx: float = event.x - ax
 		local ly: float = event.y - ay
 		local inside: boolean = not covered and lx >= 0.0 and ly >= 0.0 and lx < self.size.width and ly < self.size.height
+
+		-- Anything the pointer reaches has to hear the moves that follow it
+		-- out again, presses included: a press can come without a move first.
+		if inside then
+			self.engaged = true
+		end
 
 		if event.kind == PointerKind.Down or event.kind == PointerKind.Scroll then
 			-- A press or a wheel turn is a real hit test: outside means not for
@@ -1986,23 +2060,46 @@ export class Element
 		-- left it, or that a press it was tracking ended somewhere else. Once
 		-- an opaque child is under the pointer, the children behind it hear
 		-- the event as outside, so a hover never lights up out of sight.
+		--
+		-- A move skips a child it can learn nothing from: one the pointer is
+		-- outside of, which wasn't engaged either. That child would only be
+		-- told "outside" again, all the way down its subtree. Skipping it is
+		-- what keeps a move from costing every widget in every window open.
+		local moving: boolean = event.kind == PointerKind.Move
+		local kidsEngaged: boolean = false
 		local hidden: boolean = covered
 		local i: integer = #self.kids
 		while i >= 1 do
-			if self.kids[i].route(event, ax, ay, hidden) == Hit.Covered then
-				hidden = true
+			local kid: Element = self.kids[i]
+
+			if not moving or kid.engaged or kid.contains(event.x - ax, event.y - ay) then
+				if kid.route(event, ax, ay, hidden) == Hit.Covered then
+					hidden = true
+				end
+
+				if kid.engaged then
+					kidsEngaged = true
+				end
 			end
 
 			i = i - 1
 		end
 
 		self.view.handleEvent(self, event, lx, ly, inside)
+		self.engaged = inside or kidsEngaged or self.data.pressed or self.data.dragging
 
 		if inside and (hidden or self.view.occludes(self)) then
 			return Hit.Covered
 		end
 
 		return Hit.Missed
+	end
+
+	-- Whether `(x, y)`, relative to the parent's origin, is inside this box.
+	local fn contains(x: float, y: float) -> boolean
+		local lx: float = x - self.offset.dx
+		local ly: float = y - self.offset.dy
+		return lx >= 0.0 and ly >= 0.0 and lx < self.size.width and ly < self.size.height
 	end
 
 	-- --- debugging -----------------------------------------------------------

@@ -270,6 +270,11 @@ export class SliderTrack extends View
 		return false
 	end
 
+	-- It has a tick to run: see `View.ticks`.
+	fn ticks() -> boolean
+		return true
+	end
+
 	-- The fill follows the value, and the knob swells while the control is live.
 	--
 	-- The fill is a `Tracker` rather than a plain controller because the value

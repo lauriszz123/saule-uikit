@@ -94,6 +94,11 @@ export class ToggleTrack extends View
 		return constraints.constrain(Size(38.0, 20.0))
 	end
 
+	-- It has a tick to run: see `View.ticks`.
+	fn ticks() -> boolean
+		return true
+	end
+
 	-- The knob slides and the track fades between the two colours on the same
 	-- 0..1 value, which is the whole reason a switch is worth animating: the
 	-- travel is what tells you which way it was thrown.

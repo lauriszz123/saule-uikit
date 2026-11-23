@@ -181,6 +181,11 @@ export class TabIndicator extends SingleChildView
 		return constraints.constrain(Size(size.width, size.height + self.thickness))
 	end
 
+	-- It has a tick to run: see `View.ticks`.
+	fn ticks() -> boolean
+		return true
+	end
+
 	fn tick(el: Element, dt: float) -> nil
 		local grow: AnimationController = motionOn(
 			el.data.scratch,
@@ -243,6 +248,11 @@ export class TabLabel extends View
 		self.focused = focused
 		self.theme = theme ?? ThemeData()
 		self.onSelected = onSelected
+	end
+
+	-- It has a tick to run: see `View.ticks`.
+	fn ticks() -> boolean
+		return true
 	end
 
 	-- Only the label colour is rebuilt here; the indicator animates itself in

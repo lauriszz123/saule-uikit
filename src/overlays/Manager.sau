@@ -206,6 +206,11 @@ export class OverlayHost extends View
 		return out
 	end
 
+	-- It has a tick to run: see `View.ticks`.
+	fn ticks() -> boolean
+		return true
+	end
+
 	-- Re-register every frame: the element is recreated whenever the host is
 	-- rebuilt, and the manager needs the live one to mark it dirty.
 	fn tick(el: Element, dt: float) -> nil

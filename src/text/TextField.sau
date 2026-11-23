@@ -268,6 +268,11 @@ export class TextField extends View
 		self.obscure = obscure
 	end
 
+	-- It has a tick to run: see `View.ticks`.
+	fn ticks() -> boolean
+		return true
+	end
+
 	fn tick(el: Element, dt: float) -> nil
 		if not self.enabled then
 			return

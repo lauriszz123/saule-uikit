@@ -91,6 +91,11 @@ export class ToastLayer extends View
 	-- How long the toast takes to arrive and to leave.
 	static local fadeTime: float = 0.22
 
+	-- It has a tick to run: see `View.ticks`.
+	fn ticks() -> boolean
+		return true
+	end
+
 	fn tick(el: Element, dt: float) -> nil
 		local elapsed: float = el.data.scratch.elapsed as float ?? 0.0
 

@@ -79,6 +79,11 @@ export class ProgressTrack extends View
 		return constraints.constrain(Size(width, self.height))
 	end
 
+	-- It has a tick to run: see `View.ticks`.
+	fn ticks() -> boolean
+		return true
+	end
+
 	-- A determinate bar eases towards whatever it was last given, so a value
 	-- that arrives in jumps — a download reporting every few hundred
 	-- kilobytes — still reads as a bar filling rather than a bar teleporting.
