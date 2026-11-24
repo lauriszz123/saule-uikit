@@ -351,6 +351,9 @@ class Main
 end
 ```
 
+`App.quit()` ends the app from anywhere, a key handler included: the frame
+in progress finishes, the window closes and `run` returns.
+
 `Main.main` stays, because that is the entry Saule actually calls — there are no
 attributes to mark one with, and no protocol conformance to hang a program on.
 What it does is one line. Everything *about* the app — its window, its size, its
@@ -1060,7 +1063,19 @@ export class BouncingBall extends View
 end
 ```
 
-`tick(el, dt)` runs once per frame on every mounted view, before layout.
+`tick(el, dt)` runs once per frame, before layout, on every mounted view
+whose `ticks()` returns true. **A view that overrides `tick` must also
+override `ticks()`:**
+
+```saule
+    fn ticks() -> boolean
+        return true
+    end
+```
+
+That is what lets the frame clock skip every part of the tree with nothing
+animating in it. Visiting all of it each frame cost an idle app more than
+anything else, and grew with every window open, seen or not.
 Painting happens every frame regardless of rebuilds, so a view that keeps its
 state in `el.data` and draws from it costs **zero rebuilds** — the right shape
 for a game world with UI layered on top. Call `el.markNeedsBuild()` from `tick`

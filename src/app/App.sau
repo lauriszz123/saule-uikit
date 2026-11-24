@@ -111,4 +111,10 @@ export class App
 	fn run() -> nil
 		self.body().present()
 	end
+
+	-- End the app after the frame it's in: the window closes and `run`
+	-- returns. Safe from anywhere, a key handler included.
+	static fn quit() -> nil
+		AppLoop.quit()
+	end
 end

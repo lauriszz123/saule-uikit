@@ -140,7 +140,9 @@ export fn runApp(
 	-- work. It starts true so the first frame always draws.
 	local needsPaint: boolean = true
 
-	while Window.isOpen() do
+	AppLoop.reset()
+
+	while Window.isOpen() and not AppLoop.quitting() do
 		local events: table<Event> = pollEvents()
 
 		-- Both of these can change while running: the window is resizable, and
@@ -253,5 +255,32 @@ export fn runApp(
 		-- the last one, and this is the loop's only pacing point — without it
 		-- an idle app would spin as fast as the CPU allows.
 		Graphics.present()
+	end
+
+	if Window.isOpen() then
+		Window.close()
+	end
+end
+
+-- Ending the app from inside it.
+--
+-- Closing the window in the middle of a frame pulls it out from under the
+-- rest of that frame — the layout and paint after a key handler then have no
+-- window to draw into. `quit` asks instead: the loop finishes the frame it is
+-- in, and stops before the next.
+export class AppLoop
+	static local stopping: boolean = false
+
+	-- End the app after this frame.
+	static fn quit() -> nil
+		AppLoop.stopping = true
+	end
+
+	static fn quitting() -> boolean
+		return AppLoop.stopping
+	end
+
+	static fn reset() -> nil
+		AppLoop.stopping = false
 	end
 end
