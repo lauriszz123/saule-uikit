@@ -120,9 +120,10 @@ export fn runApp(
 	height: integer = 600,
 	title: string = "Saule",
 	background: Color? = nil,
-	keyRepeat: boolean = true
+	keyRepeat: boolean = true,
+	resizable: boolean = true
 ) -> nil
-	Window.create(width, height, title)
+	Window.create(width, height, title, resizable)
 	Keyboard.setKeyRepeat(keyRepeat)
 	Keyboard.setTextInput(false)
 

@@ -59,6 +59,9 @@ export class WindowGroup extends Scene
 	height: integer
 	background: Color?
 	keyRepeat: boolean
+	-- Whether the window can be resized. One that can't stays the size it
+	-- asks for, and a window manager may float it rather than tile it.
+	resizable: boolean
 	root: View?
 
 	fn init(
@@ -67,6 +70,7 @@ export class WindowGroup extends Scene
 		height: integer = 600,
 		background: Color? = nil,
 		keyRepeat: boolean = true,
+		resizable: boolean = true,
 		root: View? = nil,
 		content: (fn() -> nil)? = nil
 	)
@@ -77,6 +81,7 @@ export class WindowGroup extends Scene
 		self.height = height
 		self.background = background
 		self.keyRepeat = keyRepeat
+		self.resizable = resizable
 		self.root = childOf(root, content)
 	end
 
@@ -87,7 +92,8 @@ export class WindowGroup extends Scene
 			height: self.height,
 			title: self.title,
 			background: self.background,
-			keyRepeat: self.keyRepeat
+			keyRepeat: self.keyRepeat,
+			resizable: self.resizable
 		)
 	end
 end

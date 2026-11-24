@@ -1235,7 +1235,10 @@ because a box configured six ways is one idea rather than six wrappers.
 
 ## Density and resizing
 
-The window is resizable, and the tree is laid out in **logical pixels**: on a
+The window is resizable unless `WindowGroup(resizable: false)` (or `runApp`'s
+`resizable: false`) says otherwise; inside a Saule window manager such a window
+keeps the size it asked for and floats. The tree is laid out in **logical
+pixels**: on a
 150% display a 200-wide button stays visually 200 wide instead of shrinking to
 two-thirds. `runApp` reads `Window.getScale()` every frame, lays out at
 `physical / scale`, and scales the root transform to match. Pointer coordinates
