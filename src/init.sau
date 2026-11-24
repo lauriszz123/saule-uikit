@@ -39,6 +39,7 @@ export from painting.Images import *
 export from painting.Image import *
 export from painting.Icon import *
 export from painting.Shortcut import *
+export from painting.Backdrop import *
 
 -- Input and motion.
 export from gestures.Gesture import *

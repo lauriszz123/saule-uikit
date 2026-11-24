@@ -1,0 +1,161 @@
+from shine import Graphics
+from core.Geometry import *
+from core.Color import *
+from framework.Framework import *
+
+-- ============================================================================
+-- Frosted glass
+-- ============================================================================
+
+-- A panel that blurs what is behind it, as a frosted glass pane does, with
+-- an optional tint over the blur and rounded corners; its child is drawn on
+-- top. The blur is Shine's `Graphics.blur`: a Gaussian blur, on the GPU
+-- where Shine draws on one.
+--
+--     Backdrop(
+--         blur: 30.0,
+--         tint: Color(0.1, 0.1, 0.14, 0.55),
+--         radius: 26.0,
+--         child: content
+--     )
+--
+-- `blur` is how far pixels mix, in pixels (at most 64 on the screen).
+-- `fade` melts the glass into what is under it: over that many pixels up
+-- from its bottom edge, blur and tint both fade out to nothing, as a bar
+-- along the top of a screen does.
+--
+-- What is behind is what has been drawn before it on the same surface. A
+-- view that draws its subtree into an image first (to fade or scale it as a
+-- whole) has nothing behind the panel in that image: it records the panels
+-- instead (`Backdrop.record` / `Backdrop.recorded`) and blurs the screen
+-- under each as it draws the image (`BackdropArea.draw`).
+export class Backdrop extends SingleChildView
+	blur: float
+	tint: Color?
+	radius: float
+	fade: float
+
+	-- While a subtree is drawn into an image: where its panels are.
+	static recording: table<BackdropArea>? = nil
+
+	fn init(
+		child: View? = nil,
+		blur: float = 30.0,
+		tint: Color? = nil,
+		radius: float = 0.0,
+		fade: float = 0.0,
+		key: string? = nil
+	)
+		self.super(child, key)
+
+		self.blur = blur
+		self.tint = tint
+		self.radius = radius
+		self.fade = fade
+	end
+
+	fn paint(el: Element, x: float, y: float) -> nil
+		local w: float = el.size.width
+		local h: float = el.size.height
+		local area: BackdropArea = BackdropArea(x, y, w, h, self.blur, self.radius, self.fade)
+		local recording: table<BackdropArea>? = Backdrop.recording
+
+		if recording != nil then
+			Table.insert(recording!, area)
+		else
+			area.draw()
+		end
+
+		local tint: Color? = self.tint
+		if tint != nil then
+			Backdrop.tintOver(tint!, x, y, w, h, self.radius, self.fade)
+		end
+
+		el.paintChildren(x, y)
+	end
+
+	-- `tint` over the rectangle, fading out over `fade` pixels up from its
+	-- bottom edge as the blur does.
+	static fn tintOver(tint: Color, x: float, y: float, w: float, h: float, radius: float, fade: float) -> nil
+		if fade <= 0.0 or h <= 0.0 then
+			tint.apply()
+			Graphics.rectangle("fill", x, y, w, h, radius)
+			return
+		end
+		local solid: float = Math.clamp((h - fade) / h, 0.0, 1.0)
+		local stops: table<float> = {
+			0.0,
+			tint.r,
+			tint.g,
+			tint.b,
+			tint.a,
+			solid,
+			tint.r,
+			tint.g,
+			tint.b,
+			tint.a,
+			1.0,
+			tint.r,
+			tint.g,
+			tint.b,
+			0.0,
+		}
+		Graphics.setColor(1.0, 1.0, 1.0, 1.0)
+		Graphics.setLinearGradient(x, y, x, y + h, stops)
+		Graphics.rectangle("fill", x, y, w, h, radius)
+		Graphics.clearGradient()
+	end
+
+	-- From now on, panels are recorded instead of blurring what is behind
+	-- them: a subtree is about to be drawn into an image.
+	static fn record() -> nil
+		Backdrop.recording = {}
+	end
+
+	-- The panels drawn since `record`, and back to blurring at once.
+	static fn recorded() -> table<BackdropArea>
+		local areas: table<BackdropArea> = Backdrop.recording ?? {}
+		Backdrop.recording = nil
+		return areas
+	end
+end
+
+-- Where a `Backdrop` was drawn: its rectangle, how far it blurs and how
+-- round its corners are, in the coordinates it was drawn in.
+export class BackdropArea
+	x: float
+	y: float
+	w: float
+	h: float
+	blur: float
+	radius: float
+	fade: float
+
+	fn init(x: float, y: float, w: float, h: float, blur: float, radius: float, fade: float = 0.0)
+		self.x = x
+		self.y = y
+		self.w = w
+		self.h = h
+		self.blur = blur
+		self.radius = radius
+		self.fade = fade
+	end
+
+	-- Blur what is under it now. Drawn scaled by `scale` about (`aboutX`,
+	-- `aboutY`), as an image of the subtree is, it blurs there instead;
+	-- `opacity` fades the blur in, as the image is faded.
+	fn draw(opacity: float = 1.0, aboutX: float = 0.0, aboutY: float = 0.0, scale: float = 1.0) -> nil
+		local x: float = aboutX + (self.x - aboutX) * scale
+		local y: float = aboutY + (self.y - aboutY) * scale
+		Graphics.blur(
+			x,
+			y,
+			self.w * scale,
+			self.h * scale,
+			self.blur * scale,
+			self.radius * scale,
+			opacity,
+			self.fade * scale
+		)
+	end
+end
