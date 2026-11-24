@@ -229,6 +229,13 @@ export class TextField extends View
 	-- editor holds lined up with what the user sees.
 	obscure: boolean
 
+	-- What gives this field the keyboard from outside: keep one and call
+	-- `requestFocus` on it. Without one the field keeps its own, and the
+	-- only ways in are a click, Tab, or `autofocus` — which applies only
+	-- while nothing else has the keyboard, so a field that must take it
+	-- from something else needs a node.
+	node: FocusNode?
+
 	fn init(
 		value: string? = nil,
 		placeholder: string = "",
@@ -246,6 +253,7 @@ export class TextField extends View
 		enabled: boolean = true,
 		autofocus: boolean = false,
 		obscure: boolean = false,
+		node: FocusNode? = nil,
 		key: string? = nil
 	)
 		self.super(key)
@@ -266,6 +274,7 @@ export class TextField extends View
 		self.enabled = enabled
 		self.autofocus = autofocus
 		self.obscure = obscure
+		self.node = node
 	end
 
 	-- It has a tick to run: see `View.ticks`.
@@ -315,9 +324,10 @@ export class TextField extends View
 		scratch.owner = self
 
 		-- The node has to outlive the rebuild that every keystroke causes, so
-		-- the element owns it. `focused` is the framework's own flag, so it is
-		-- read straight off `data` rather than out of the bag.
-		local node: FocusNode = nodeFor(data)
+		-- the element owns it unless the owner gave one. `focused` is the
+		-- framework's own flag, so it is read straight off `data` rather than
+		-- out of the bag.
+		local node: FocusNode = self.node ?? nodeFor(data)
 		local text: string = scratch.text as string ?? ""
 		local caret: integer = scratch.caret as integer ?? 0
 		local anchor: integer = scratch.anchor as integer ?? 0

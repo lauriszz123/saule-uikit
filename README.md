@@ -687,6 +687,15 @@ TextField(
 end
 ```
 
+To give a field the keyboard from outside, hand it a `FocusNode` and call
+`requestFocus` on that. `autofocus` is not enough when something else already
+has the keyboard: it applies only while nothing does.
+
+```saule
+TextField(placeholder: "Search", node: searchNode)
+searchNode.requestFocus()
+```
+
 `onSubmitted` is *declared before* `onChanged` so that this works out. A block
 binds to the last function-typed parameter nothing else claimed, so whichever
 callback should be the default has to come last — declared the other way round,

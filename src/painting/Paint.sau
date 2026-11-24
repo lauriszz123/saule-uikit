@@ -385,8 +385,14 @@ export class Opacity extends SingleChildView
 			return
 		end
 
-		local width: integer = el.size.width as integer
-		local height: integer = el.size.height as integer
+		-- The canvas is in physical pixels. Text is rasterised at the
+		-- display's scale (see `TextStyle`), so a canvas in logical pixels,
+		-- drawn into without that scale, showed every glyph at twice its size
+		-- on a Retina screen; and it would have been half the resolution of
+		-- the screen anyway.
+		local density: float = Display.scale()
+		local width: integer = (el.size.width * density) as integer
+		local height: integer = (el.size.height * density) as integer
 
 		if width <= 0 or height <= 0 then
 			return
@@ -399,11 +405,11 @@ export class Opacity extends SingleChildView
 		local sx: float, sy: float, sw: float, sh: float = Graphics.getScissor()
 
 		Graphics.setCanvas(canvas)
-		Graphics.setScissor(0.0, 0.0, width as float, height as float)
-		Graphics.clear(0.0, 0.0, 0.0, 0.0)
-
 		Graphics.push()
 		Graphics.origin()
+		Graphics.setScissor(0.0, 0.0, width as float, height as float)
+		Graphics.clear(0.0, 0.0, 0.0, 0.0)
+		Graphics.scale(density, density)
 		Graphics.translate(-x, -y)
 		el.paintChildren(x, y)
 		Graphics.pop()
@@ -412,8 +418,10 @@ export class Opacity extends SingleChildView
 		Graphics.setScissor(sx, sy, sw, sh)
 
 		-- `draw` tints by the current colour, so the alpha *is* the opacity.
+		-- Scaled back from physical pixels to the logical ones it sits in.
+		local back: float = 1.0 / density
 		Graphics.setColor(1.0, 1.0, 1.0, self.opacity)
-		Graphics.draw(canvas, x, y)
+		Graphics.draw(canvas, x, y, 0.0, back, back)
 		Graphics.setColor(1.0, 1.0, 1.0, 1.0)
 	end
 
