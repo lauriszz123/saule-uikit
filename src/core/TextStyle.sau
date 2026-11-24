@@ -26,6 +26,36 @@ export fn splitOn(text: string, separator: string) -> table<string>
 	return out
 end
 
+-- A letter or a digit, of the plain Latin kind: what a hyphen sits between
+-- when a line may break after it.
+local fn isWordChar(ch: string) -> boolean
+	return (ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z") or (ch >= "0" and ch <= "9")
+end
+
+-- A word in the pieces a line may break between: after each hyphen inside
+-- it, as "well-" "known", or a kernel's "6.18.58-" "microsoft-" "standard".
+-- Only between letters or digits, so "-5" keeps its sign and "--" stays
+-- whole. A word without such a hyphen is one piece.
+export fn hyphenPieces(word: string) -> table<string>
+	local out: table<string> = {}
+	local length: integer = String.len(word)
+	local start: integer = 1
+
+	for i: integer = 2, length - 1 do
+		local before: string = String.sub(word, i - 1, i - 1)
+		local after: string = String.sub(word, i + 1, i + 1)
+
+		if String.sub(word, i, i) == "-" and isWordChar(before) and isWordChar(after) then
+			out[#out + 1] = String.sub(word, start, i)
+			start = i + 1
+		end
+	end
+
+	out[#out + 1] = String.sub(word, start)
+
+	return out
+end
+
 -- How a `Text` view is drawn, plus the measurement the layout pass needs.
 --
 -- Fonts are a global, handle-based resource in the engine, so styles share a
@@ -149,9 +179,10 @@ export class TextStyle
 	-- Split `text` into lines that each fit within `maxWidth`.
 	--
 	-- Explicit newlines always break. Within a paragraph the break is greedy and
-	-- on spaces, which is what a UI wants — no hyphenation, no justification. A
-	-- single word wider than `maxWidth` is left to overflow rather than being
-	-- chopped mid-word, since that reads worse than a clipped edge.
+	-- on spaces, or after a hyphen inside a word ("standard-" "WSL2"), which is
+	-- what a UI wants — no hyphenation, no justification. A single word wider
+	-- than `maxWidth` with no hyphen to break at is left to overflow rather than
+	-- being chopped mid-word, since that reads worse than a clipped edge.
 	fn wrap(text: string, maxWidth: float) -> table<string>
 		local out: table<string> = {}
 
@@ -182,20 +213,27 @@ export class TextStyle
 		local line: string = ""
 
 		for word: string in splitOn(paragraph, " ") do
-			local candidate: string = word
+			-- A word's pieces join without a space, words with one.
+			local joint: string = " "
 
-			if #line > 0 then
-				candidate = line .. " " .. word
-			end
+			for piece: string in hyphenPieces(word) do
+				local candidate: string = piece
 
-			if self.measure(candidate).width <= maxWidth then
-				line = candidate
-			else
 				if #line > 0 then
-					out[#out + 1] = line
+					candidate = line .. joint .. piece
 				end
 
-				line = word
+				if self.measure(candidate).width <= maxWidth then
+					line = candidate
+				else
+					if #line > 0 then
+						out[#out + 1] = line
+					end
+
+					line = piece
+				end
+
+				joint = ""
 			end
 		end
 
