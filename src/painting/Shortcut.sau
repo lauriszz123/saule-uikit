@@ -1,0 +1,186 @@
+from shine import Graphics
+from core.Geometry import *
+from core.Color import *
+from core.TextStyle import *
+from framework.Framework import *
+from layout.Stacks import *
+
+-- ============================================================================
+-- Keyboard shortcuts
+-- ============================================================================
+--
+-- A shortcut as the keys to press, each a small outlined key cap with what
+-- is printed on the key, side by side:
+--
+--     Shortcut({"ctrl", "super", "q"})        [Ctrl] [☀] [Q]
+--     Shortcut({"alt", "super", "escape"}, color: dim, size: 12.0)
+--
+-- Key names are the engine's. Each key is labelled the way a PC keyboard
+-- prints it: "ctrl" is Ctrl, "alt" Alt (Option on a Mac), "shift" Shift, "escape" Esc,
+-- "return" Enter, "space" Space, "q" Q, "f5" F5. Two are drawn rather than
+-- written: "super", the logo key, is Saule's sun, and the arrow keys are
+-- arrows. Drawn, they need no font that happens to have the symbol.
+
+export class Shortcut extends View
+	keys: table<string>
+	color: Color?
+	size: float
+
+	fn init(keys: table<string>, color: Color? = nil, size: float = 12.0, key: string? = nil)
+		self.super(key)
+
+		self.keys = keys
+		self.color = color
+		self.size = size
+	end
+
+	fn body(context: BuildContext) -> View
+		local color: Color = self.color ?? Colors.textMuted
+		local caps: table<View> = {}
+
+		for name: string in self.keys do
+			caps[#caps + 1] = KeyCap(name, color, self.size)
+		end
+
+		return HStack(children: caps, sizing: StackSize.Fit, spacing: Math.max(self.size * 0.25, 2.0))
+	end
+end
+
+-- One key: an outlined, slightly rounded cap with the key's label in the
+-- middle, at least as wide as it is tall. `size` is the label's text size.
+export class KeyCap extends View
+	name: string
+	color: Color
+	size: float
+
+	fn init(name: string, color: Color, size: float = 12.0, key: string? = nil)
+		self.super(key)
+
+		self.name = name
+		self.color = color
+		self.size = size
+	end
+
+	-- What is printed on the key, or "" for a key whose symbol is drawn.
+	static fn label(name: string) -> string
+		return match String.lower(name)
+			case "super" then ""
+			case "left" then ""
+			case "right" then ""
+			case "up" then ""
+			case "down" then ""
+			case "ctrl" then "Ctrl"
+			case "control" then "Ctrl"
+			case "alt" then KeyCap.altLabel()
+			case "shift" then "Shift"
+			case "escape" then "Esc"
+			case "return" then "Enter"
+			case _ then KeyCap.capitalised(name)
+		end
+	end
+
+	-- Alt is printed "option" on a Mac's keyboard.
+	static fn altLabel() -> string
+		if Os.platform() == OsPlatform.Macos then
+			return "Option"
+		end
+
+		return "Alt"
+	end
+
+	static fn capitalised(name: string) -> string
+		if String.len(name) == 1 then
+			return String.upper(name)
+		end
+
+		return String.upper(String.sub(name, 1, 1)) .. String.sub(name, 2)
+	end
+
+	fn layout(el: Element, constraints: Constraints) -> Size
+		local height: float = self.capHeight()
+		local width: float = height
+		local label: string = KeyCap.label(self.name)
+
+		if label != "" then
+			local text: float = self.style().measure(label).width
+			width = Math.max(height, text + self.size * 0.8)
+		end
+
+		return constraints.constrain(Size(Math.ceil(width) as float, height))
+	end
+
+	fn paint(el: Element, x: float, y: float) -> nil
+		local w: float = el.size.width
+		local h: float = el.size.height
+
+		Graphics.push("all")
+		Graphics.setLineWidth(1.0)
+		self.color.withAlpha(self.color.a * 0.55).apply()
+		Graphics.rectangle("line", x + 0.5, y + 0.5, w - 1.0, h - 1.0, Math.min(h * 0.22, 4.0))
+
+		local label: string = KeyCap.label(self.name)
+
+		if label != "" then
+			local style: TextStyle = self.style()
+			local size: Size = style.measure(label)
+			style.draw(
+				label,
+				x + (Math.floor((w - size.width) / 2.0) as float),
+				y + (Math.floor((h - size.height) / 2.0) as float)
+			)
+		else
+			self.color.apply()
+			self.symbol(x + w / 2.0, y + h / 2.0, h * 0.62)
+		end
+
+		Graphics.pop()
+	end
+
+	-- The cap is the label's line with a little room above and below.
+	local fn capHeight() -> float
+		return Math.ceil(self.size * 1.45) as float
+	end
+
+	local fn style() -> TextStyle
+		return TextStyle(self.color, self.size * 0.85)
+	end
+
+	-- A drawn key, `s` across, about (`cx`, `cy`).
+	local fn symbol(cx: float, cy: float, s: float) -> nil
+		Graphics.setLineWidth(Math.max(s * 0.1, 1.0))
+
+		match String.lower(self.name)
+			case "super" then KeyCap.sun(cx, cy, s)
+			case "left" then KeyCap.arrow(cx, cy, s, -1.0, 0.0)
+			case "right" then KeyCap.arrow(cx, cy, s, 1.0, 0.0)
+			case "up" then KeyCap.arrow(cx, cy, s, 0.0, -1.0)
+			case "down" then KeyCap.arrow(cx, cy, s, 0.0, 1.0)
+			case _ then nil
+		end
+	end
+
+	-- Saule's sun, as on its logo key: a disc with eight short rays.
+	static fn sun(cx: float, cy: float, s: float) -> nil
+		Graphics.circle("fill", cx, cy, s * 0.2)
+
+		for i: integer = 0, 7 do
+			local angle: float = Math.pi * (i as float) / 4.0
+			local dx: float = Math.cos(angle)
+			local dy: float = Math.sin(angle)
+			Graphics.line(cx + dx * s * 0.32, cy + dy * s * 0.32, cx + dx * s * 0.48, cy + dy * s * 0.48)
+		end
+	end
+
+	-- An arrow pointing (`dx`, `dy`): a shaft and two barbs.
+	static fn arrow(cx: float, cy: float, s: float, dx: float, dy: float) -> nil
+		local half: float = s * 0.4
+		local barb: float = s * 0.25
+		local tipX: float = cx + dx * half
+		local tipY: float = cy + dy * half
+
+		Graphics.line(cx - dx * half, cy - dy * half, tipX, tipY)
+		-- The barbs go back from the tip, out to either side.
+		Graphics.line(tipX, tipY, tipX - dx * barb - dy * barb, tipY - dy * barb + dx * barb)
+		Graphics.line(tipX, tipY, tipX - dx * barb + dy * barb, tipY - dy * barb - dx * barb)
+	end
+end

@@ -824,6 +824,21 @@ missing file logs once and draws nothing rather than taking the frame down. The
 path is read relative to the project root, not the working directory — see
 [Asset paths](#asset-paths).
 
+## Keyboard shortcuts
+
+`Shortcut` shows a shortcut as the keys to press: a small outlined key cap
+for each, labelled as a PC keyboard prints it.
+
+```saule
+Shortcut({"ctrl", "super", "q"})                             -- [Ctrl] [☀] [Q]
+Shortcut({"alt", "super", "escape"}, color: dim, size: 11.0) -- [Alt] [☀] [Esc]
+```
+
+Key names are the engine's: `"ctrl"` is Ctrl, `"alt"` Alt, `"shift"` Shift,
+`"escape"` Esc, `"return"` Enter, and anything else is capitalised (`"q"` is Q,
+`"f5"` F5). `"super"`, the logo key, is drawn as Saule's sun, and the arrow keys
+as arrows (`KeyCap`), so no font needs those symbols.
+
 ## Data: grids and tables
 
 ```saule
