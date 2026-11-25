@@ -17,6 +17,7 @@ export from core.Assets import *
 export from core.Tween import *
 export from core.Events import *
 export from core.Input import *
+export from core.Callbacks import *
 export from core.ZStackData import *
 export from core.Date import *
 

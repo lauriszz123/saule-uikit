@@ -1,4 +1,5 @@
 from core.Geometry import *
+from core.Callbacks import *
 from framework.Framework import *
 from layout.Boxes import *
 
@@ -149,7 +150,7 @@ export class AxisStack extends View
 		sizing: StackSize = StackSize.Fill,
 		spacing: float = 0.0,
 		key: string? = nil,
-		content: (fn() -> nil)? = nil
+		content: Action? = nil
 	)
 		self.super(key)
 
@@ -323,7 +324,7 @@ export class HStack extends AxisStack
 		sizing: StackSize = StackSize.Fill,
 		spacing: float = 0.0,
 		key: string? = nil,
-		content: (fn() -> nil)? = nil
+		content: Action? = nil
 	)
 		self.super(Axis.Horizontal, children, distribution, alignment, sizing, spacing, key, content)
 	end
@@ -342,7 +343,7 @@ export class VStack extends AxisStack
 		sizing: StackSize = StackSize.Fill,
 		spacing: float = 0.0,
 		key: string? = nil,
-		content: (fn() -> nil)? = nil
+		content: Action? = nil
 	)
 		self.super(Axis.Vertical, children, distribution, alignment, sizing, spacing, key, content)
 	end
@@ -380,7 +381,7 @@ export class FlowStack extends View
 		distribution: Distribution = Distribution.Start,
 		alignment: StackAlignment = StackAlignment.Leading,
 		key: string? = nil,
-		content: (fn() -> nil)? = nil
+		content: Action? = nil
 	)
 		self.super(key)
 

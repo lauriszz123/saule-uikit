@@ -3,6 +3,7 @@ from core.Color import *
 from core.TextStyle import *
 from core.ThemeData import *
 from core.Input import *
+from core.Callbacks import *
 from framework.Framework import *
 from Theme import *
 from layout.Boxes import *
@@ -45,7 +46,7 @@ export class Grid extends View
 		runSpacing: float = 8.0,
 		aspectRatio: float? = nil,
 		key: string? = nil,
-		content: (fn() -> nil)? = nil
+		content: Action? = nil
 	)
 		self.super(key)
 

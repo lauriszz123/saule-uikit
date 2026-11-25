@@ -9,6 +9,7 @@ from Theme import *
 from animation.Animation import *
 from controls.Activatable import *
 from core.Tween import *
+from core.Callbacks import *
 from framework.Diagnostics import *
 
 -- ============================================================================
@@ -25,7 +26,7 @@ export class Radio extends View
 	value: string
 	groupValue: string
 	label: string
-	onChanged: (fn(string) -> nil)?
+	onChanged: ValueChanged<string>?
 	enabled: boolean
 	autofocus: boolean
 
@@ -33,7 +34,7 @@ export class Radio extends View
 		value: string = "",
 		groupValue: string = "",
 		label: string = "",
-		onChanged: (fn(string) -> nil)? = nil,
+		onChanged: ValueChanged<string>? = nil,
 		enabled: boolean = true,
 		autofocus: boolean = false,
 		key: string? = nil
@@ -49,7 +50,7 @@ export class Radio extends View
 	end
 
 	local fn select() -> nil
-		local changed: (fn(string) -> nil)? = self.onChanged
+		local changed: ValueChanged<string>? = self.onChanged
 
 		if changed != nil and self.enabled then
 			changed(self.value)

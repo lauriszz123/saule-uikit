@@ -5,6 +5,7 @@ from framework.Framework import *
 from painting.Paint import *
 from gestures.Gesture import *
 from core.ThemeData import *
+from core.Callbacks import *
 from Theme import *
 from layout.Boxes import *
 from layout.Stacks import *
@@ -163,7 +164,7 @@ export class Screen extends View
 		background: Color? = nil,
 		padding: EdgeInsets? = nil,
 		key: string? = nil,
-		builder: (fn() -> nil)? = nil
+		builder: Action? = nil
 	)
 		self.super(key)
 

@@ -5,6 +5,7 @@ from core.ThemeData import *
 from core.Events import *
 from core.Input import *
 from core.ZStackData import *
+from core.Callbacks import *
 from framework.Diagnostics import *
 
 -- ============================================================================
@@ -1011,14 +1012,14 @@ end
 -- `children:` is still there for the case a block cannot express — a list
 -- assembled in a loop, or one that came from somewhere else. The block wins if
 -- somebody passes both.
-export fn childrenOf(children: table<View>, content: (fn() -> nil)?) -> table<View>
+export fn childrenOf(children: table<View>, content: Action?) -> table<View>
 	if content == nil then
 		return claimedAll(children)
 	end
 
 	-- Bound to a typed local first: calling through the nullable directly
 	-- leaves the result untyped, and Saule checks every position.
-	local build: fn() -> nil = content!
+	local build: Action = content!
 
 	ViewBuilder.open()
 	build()
@@ -1031,7 +1032,7 @@ end
 -- A block that produced several views gets a `VStack` around them, the way
 -- `ScrollView { … }` does in SwiftUI. The stack comes from the modifier
 -- registry, because `VStack` lives in a file that imports this one.
-export fn childOf(child: View?, content: (fn() -> nil)?) -> View?
+export fn childOf(child: View?, content: Action?) -> View?
 	if content == nil then
 		return claimed(child)
 	end
@@ -1806,7 +1807,7 @@ export class Element
 	-- Two views describe the same position — and therefore keep the same
 	-- element, its state and its scratch — when their class and key agree.
 	static fn canUpdate(a: View, b: View) -> boolean
-		return type(a) == type(b) and a.key == b.key
+		return typeof(a) == typeof(b) and a.key == b.key
 	end
 
 	-- Match `news` against `olds`, reusing an element where `canUpdate` allows,
@@ -2108,7 +2109,7 @@ export class Element
 		println(
 			String.rep("  ", depth) .. String.format(
 				"%s  size=%.0fx%.0f offset=%.0f,%.0f",
-				type(self.view),
+				typeof(self.view),
 				self.size.width,
 				self.size.height,
 				self.offset.dx,

@@ -1,5 +1,6 @@
 from core.Geometry import *
 from core.Color import *
+from core.Callbacks import *
 from framework.Framework import *
 from app.Runtime import *
 from layout.Boxes import *
@@ -72,7 +73,7 @@ export class WindowGroup extends Scene
 		keyRepeat: boolean = true,
 		resizable: boolean = true,
 		root: View? = nil,
-		content: (fn() -> nil)? = nil
+		content: Action? = nil
 	)
 		self.super()
 

@@ -1,5 +1,6 @@
 from core.Geometry import *
 from core.ZStackData import *
+from core.Callbacks import *
 from framework.Framework import *
 
 -- ============================================================================
@@ -26,7 +27,7 @@ export class ZStack extends View
 		children: table<View> = {},
 		alignment: Alignment? = nil,
 		key: string? = nil,
-		content: (fn() -> nil)? = nil
+		content: Action? = nil
 	)
 		self.super(key)
 

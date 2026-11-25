@@ -3,6 +3,7 @@ from core.Color import *
 from core.TextStyle import *
 from core.ThemeData import *
 from core.Input import *
+from core.Callbacks import *
 from framework.Framework import *
 from Theme import *
 from gestures.Gesture import *
@@ -55,7 +56,7 @@ export fn showDialog(
 	-- The real builder needs the handle so the dialog can close itself, and the
 	-- handle needs the entry — hence the placeholder above, replaced here.
 	entry.builder = fn()
-		local dismiss: (fn() -> nil)? = nil
+		local dismiss: Action? = nil
 
 		if dismissible then
 			dismiss = fn()

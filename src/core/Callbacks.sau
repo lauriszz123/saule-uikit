@@ -1,0 +1,30 @@
+from core.Input import *
+
+-- The shapes of the callbacks views are handed, named once.
+--
+-- A view's `onPressed`, `onChanged` and the rest are function-typed fields,
+-- and nearly all of them have one of a handful of signatures. These are
+-- aliases for those signatures: `Action` *is* `fn() -> nil`, in both
+-- directions, so a lambda fits a field typed with one exactly as it did when
+-- the signature was written out — and an app may use the names for its own
+-- callbacks or keep writing the signatures; they are the same type.
+--
+-- An optional callback is the alias and a `?`: `onPressed: Action?`.
+
+-- Something to do, with nothing to be told: a button pressed, a dialog
+-- dismissed, a menu item chosen.
+export type Action = fn() -> nil
+
+-- A new value, handed to whoever owns it: the text of a field, the state of
+-- a toggle, the index of a tab, the day picked from a calendar.
+--
+--     onChanged: ValueChanged<string>?
+export type ValueChanged<T> = fn(T) -> nil
+
+-- Something that happened at a point, in the coordinates of the view it was
+-- given to: a tap at (x, y), a drag to (x, y).
+export type PointAction = fn(float, float) -> nil
+
+-- A key, offered to a view. It answers true when it used the key, which
+-- stops it from being offered to anything else.
+export type KeyHandler = fn(KeyEvent) -> boolean

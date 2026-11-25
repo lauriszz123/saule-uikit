@@ -3,6 +3,7 @@ from core.Color import *
 from core.TextStyle import *
 from core.ThemeData import *
 from core.Input import *
+from core.Callbacks import *
 from framework.Framework import *
 from Theme import *
 from gestures.Gesture import *
@@ -62,9 +63,9 @@ end
 export class TableRow
 	cells: table<View>
 	key: string?
-	onTap: (fn() -> nil)?
+	onTap: Action?
 
-	fn init(cells: table<View> = {}, key: string? = nil, onTap: (fn() -> nil)? = nil)
+	fn init(cells: table<View> = {}, key: string? = nil, onTap: Action? = nil)
 		self.cells = claimedAll(cells)
 		self.key = key
 		self.onTap = onTap
@@ -226,13 +227,13 @@ export class TableHeaderCell extends View
 	column: TableColumn
 	order: SortOrder
 	theme: ThemeData
-	onTap: (fn() -> nil)?
+	onTap: Action?
 
 	fn init(
 		column: TableColumn,
 		order: SortOrder = SortOrder.None,
 		theme: ThemeData? = nil,
-		onTap: (fn() -> nil)? = nil,
+		onTap: Action? = nil,
 		key: string? = nil
 	)
 		self.super(key)

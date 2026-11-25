@@ -9,6 +9,7 @@ from Theme import *
 from animation.Animation import *
 from controls.Activatable import *
 from core.Tween import *
+from core.Callbacks import *
 from framework.Diagnostics import *
 
 -- ============================================================================
@@ -168,14 +169,14 @@ end
 export class Checkbox extends View
 	value: boolean
 	label: string
-	onChanged: (fn(boolean) -> nil)?
+	onChanged: ValueChanged<boolean>?
 	enabled: boolean
 	autofocus: boolean
 
 	fn init(
 		value: boolean = false,
 		label: string = "",
-		onChanged: (fn(boolean) -> nil)? = nil,
+		onChanged: ValueChanged<boolean>? = nil,
 		enabled: boolean = true,
 		autofocus: boolean = false,
 		key: string? = nil
@@ -190,7 +191,7 @@ export class Checkbox extends View
 	end
 
 	local fn toggle() -> nil
-		local changed: (fn(boolean) -> nil)? = self.onChanged
+		local changed: ValueChanged<boolean>? = self.onChanged
 
 		if changed != nil and self.enabled then
 			changed(not self.value)

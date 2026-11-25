@@ -11,6 +11,7 @@ from text.TextField import *
 from core.Tween import *
 from animation.Animation import *
 from core.Input import *
+from core.Callbacks import *
 from text.TextEngine import *
 from text.LineMap import *
 
@@ -183,7 +184,7 @@ end
 export class TextEditor extends View
 	value: string
 	placeholder: string
-	onChanged: (fn(string) -> nil)?
+	onChanged: ValueChanged<string>?
 
 	style: TextStyle?
 	placeholderStyle: TextStyle?
@@ -205,7 +206,7 @@ export class TextEditor extends View
 	fn init(
 		value: string = "",
 		placeholder: string = "",
-		onChanged: (fn(string) -> nil)? = nil,
+		onChanged: ValueChanged<string>? = nil,
 		style: TextStyle? = nil,
 		placeholderStyle: TextStyle? = nil,
 		background: Color? = nil,

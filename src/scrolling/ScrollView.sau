@@ -4,6 +4,7 @@ from core.Color import *
 from core.TextStyle import *
 from core.ThemeData import *
 from core.Input import *
+from core.Callbacks import *
 from framework.Framework import *
 from Theme import *
 from gestures.Gesture import *
@@ -127,7 +128,7 @@ export class ScrollView extends View
 		showBar: boolean = true,
 		barColor: Color? = nil,
 		key: string? = nil,
-		content: (fn() -> nil)? = nil
+		content: Action? = nil
 	)
 		self.super(key)
 
@@ -258,7 +259,7 @@ export class List extends View
 		step: float = 48.0,
 		showBar: boolean = true,
 		key: string? = nil,
-		content: (fn() -> nil)? = nil
+		content: Action? = nil
 	)
 		self.super(key)
 

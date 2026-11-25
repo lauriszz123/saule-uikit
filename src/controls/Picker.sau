@@ -3,6 +3,7 @@ from core.Color import *
 from core.TextStyle import *
 from core.ThemeData import *
 from core.Input import *
+from core.Callbacks import *
 from framework.Framework import *
 from Theme import *
 from animation.Animation import *
@@ -42,7 +43,7 @@ export class Picker extends View
 	value: string
 	options: table<string>
 	placeholder: string
-	onChanged: (fn(string) -> nil)?
+	onChanged: ValueChanged<string>?
 	enabled: boolean
 	autofocus: boolean
 	width: float?
@@ -51,7 +52,7 @@ export class Picker extends View
 		value: string = "",
 		options: table<string> = {},
 		placeholder: string = "Select…",
-		onChanged: (fn(string) -> nil)? = nil,
+		onChanged: ValueChanged<string>? = nil,
 		enabled: boolean = true,
 		autofocus: boolean = false,
 		width: float? = nil,
@@ -78,7 +79,7 @@ export class Picker extends View
 			items[#items + 1] = MenuItem(
 				option,
 				fn()
-					local changed: (fn(string) -> nil)? = self.onChanged
+					local changed: ValueChanged<string>? = self.onChanged
 
 					if changed != nil then
 						changed(picked)

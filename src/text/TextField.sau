@@ -8,6 +8,7 @@ from gestures.Gesture import *
 from core.Tween import *
 from animation.Animation import *
 from core.Input import *
+from core.Callbacks import *
 from framework.Diagnostics import *
 from text.TextEngine import *
 
@@ -205,8 +206,8 @@ export class TextField extends View
 	--
 	-- Declared the other way round, the first form would silently fill
 	-- `onSubmitted` and the field would appear to ignore every keystroke.
-	onSubmitted: (fn(string) -> nil)?
-	onChanged: (fn(string) -> nil)?
+	onSubmitted: ValueChanged<string>?
+	onChanged: ValueChanged<string>?
 
 	style: TextStyle?
 	placeholderStyle: TextStyle?
@@ -239,8 +240,8 @@ export class TextField extends View
 	fn init(
 		value: string? = nil,
 		placeholder: string = "",
-		onSubmitted: (fn(string) -> nil)? = nil,
-		onChanged: (fn(string) -> nil)? = nil,
+		onSubmitted: ValueChanged<string>? = nil,
+		onChanged: ValueChanged<string>? = nil,
 		style: TextStyle? = nil,
 		placeholderStyle: TextStyle? = nil,
 		background: Color? = nil,
@@ -491,7 +492,7 @@ export class TextField extends View
 
 			return true
 		elseif key == "return" then
-			local submitted: (fn(string) -> nil)? = self.onSubmitted
+			local submitted: ValueChanged<string>? = self.onSubmitted
 			if submitted != nil then
 				submitted(editor.text())
 			end

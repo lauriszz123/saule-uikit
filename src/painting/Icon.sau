@@ -9,6 +9,7 @@ from gestures.Gesture import *
 from core.ThemeData import *
 from Theme import *
 from core.Input import *
+from core.Callbacks import *
 
 -- ============================================================================
 -- Icons
@@ -153,7 +154,7 @@ end
 -- A tappable icon: the button shape, without a label.
 export class IconButton extends View
 	icon: integer
-	onPressed: (fn() -> nil)?
+	onPressed: Action?
 	size: float
 	color: Color?
 	tooltip: string
@@ -162,7 +163,7 @@ export class IconButton extends View
 
 	fn init(
 		icon: integer = 0,
-		onPressed: (fn() -> nil)? = nil,
+		onPressed: Action? = nil,
 		size: float = 20.0,
 		color: Color? = nil,
 		tooltip: string = "",
@@ -235,7 +236,7 @@ export class IconButton extends View
 					return false
 				end
 
-				local callback: (fn() -> nil)? = self.onPressed
+				local callback: Action? = self.onPressed
 				if callback != nil then
 					callback()
 				end

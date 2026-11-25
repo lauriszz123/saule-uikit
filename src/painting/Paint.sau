@@ -2,6 +2,7 @@ from shine import Graphics, Canvas
 from core.Geometry import *
 from core.Color import *
 from core.TextStyle import *
+from core.Callbacks import *
 from framework.Framework import *
 from layout.Boxes import *
 
@@ -114,7 +115,7 @@ export class Box extends View
 		alignment: Alignment? = nil,
 		clip: boolean = false,
 		key: string? = nil,
-		content: (fn() -> nil)? = nil
+		content: Action? = nil
 	)
 		self.super(key)
 

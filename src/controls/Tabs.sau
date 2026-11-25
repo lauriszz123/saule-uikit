@@ -8,6 +8,7 @@ from framework.Framework import *
 from Theme import *
 from animation.Animation import *
 from core.Tween import *
+from core.Callbacks import *
 from framework.Diagnostics import *
 from gestures.Gesture import *
 from layout.Boxes import *
@@ -32,14 +33,14 @@ from painting.Paint import *
 export class TabBar extends View
 	tabs: table<string>
 	index: integer
-	onChanged: (fn(integer) -> nil)?
+	onChanged: ValueChanged<integer>?
 	enabled: boolean
 	autofocus: boolean
 
 	fn init(
 		tabs: table<string> = {},
 		index: integer = 1,
-		onChanged: (fn(integer) -> nil)? = nil,
+		onChanged: ValueChanged<integer>? = nil,
 		enabled: boolean = true,
 		autofocus: boolean = false,
 		key: string? = nil
@@ -55,7 +56,7 @@ export class TabBar extends View
 
 	-- Clamp and report. Every path into a new tab goes through here.
 	local fn select(next: integer) -> nil
-		local changed: (fn(integer) -> nil)? = self.onChanged
+		local changed: ValueChanged<integer>? = self.onChanged
 
 		if changed == nil or not self.enabled or #self.tabs == 0 then
 			return
@@ -231,14 +232,14 @@ export class TabLabel extends View
 	selected: boolean
 	focused: boolean
 	theme: ThemeData
-	onSelected: (fn() -> nil)?
+	onSelected: Action?
 
 	fn init(
 		label: string = "",
 		selected: boolean = false,
 		focused: boolean = false,
 		theme: ThemeData? = nil,
-		onSelected: (fn() -> nil)? = nil,
+		onSelected: Action? = nil,
 		key: string? = nil
 	)
 		self.super(key)
@@ -315,17 +316,17 @@ export class TabView extends View
 	tabs: table<string>
 	children: table<View>
 	index: integer
-	onChanged: (fn(integer) -> nil)?
+	onChanged: ValueChanged<integer>?
 	autofocus: boolean
 
 	fn init(
 		tabs: table<string> = {},
 		children: table<View> = {},
 		index: integer = 1,
-		onChanged: (fn(integer) -> nil)? = nil,
+		onChanged: ValueChanged<integer>? = nil,
 		autofocus: boolean = false,
 		key: string? = nil,
-		content: (fn() -> nil)? = nil
+		content: Action? = nil
 	)
 		self.super(key)
 

@@ -9,6 +9,7 @@ from framework.Framework import *
 from Theme import *
 from animation.Animation import *
 from core.Tween import *
+from core.Callbacks import *
 from gestures.Gesture import *
 from layout.Boxes import *
 from layout.Stacks import *
@@ -43,7 +44,7 @@ export fn showDatePicker(
 	x: float,
 	y: float,
 	selected: Date? = nil,
-	onPicked: (fn(Date) -> nil)? = nil
+	onPicked: ValueChanged<Date>? = nil
 ) -> OverlayHandle?
 	local owner: BuildOwner? = context.owner()
 
@@ -60,7 +61,7 @@ export fn showDatePicker(
 	local chosen: Date = selected ?? Date.today()
 	local state: table = {cursor: chosen, month: chosen.startOfMonth()}
 
-	local pick: fn(Date) -> nil = fn(date: Date)
+	local pick: ValueChanged<Date> = fn(date: Date)
 		handle.dismiss()
 
 		if onPicked != nil then
@@ -68,14 +69,14 @@ export fn showDatePicker(
 		end
 	end
 
-	local moveCursor: fn(integer) -> nil = fn(days: integer)
+	local moveCursor: ValueChanged<integer> = fn(days: integer)
 		local next: Date = state.cursor.addDays(days)
 		state.cursor = next
 		state.month = next.startOfMonth()
 		handle.refresh()
 	end
 
-	local moveMonth: fn(integer) -> nil = fn(months: integer)
+	local moveMonth: ValueChanged<integer> = fn(months: integer)
 		state.month = state.month.addMonths(months)
 		handle.refresh()
 	end
@@ -166,15 +167,15 @@ export class CalendarCard extends View
 	month: Date
 	selected: Date
 	cursor: Date
-	onPick: (fn(Date) -> nil)?
-	onMonth: (fn(integer) -> nil)?
+	onPick: ValueChanged<Date>?
+	onMonth: ValueChanged<integer>?
 
 	fn init(
 		month: Date,
 		selected: Date,
 		cursor: Date,
-		onPick: (fn(Date) -> nil)? = nil,
-		onMonth: (fn(integer) -> nil)? = nil,
+		onPick: ValueChanged<Date>? = nil,
+		onMonth: ValueChanged<integer>? = nil,
 		key: string? = nil
 	)
 		self.super(key)
@@ -289,9 +290,9 @@ end
 export class CalendarStep extends View
 	icon: integer
 	theme: ThemeData
-	onTap: (fn() -> nil)?
+	onTap: Action?
 
-	fn init(icon: integer = 0, theme: ThemeData? = nil, onTap: (fn() -> nil)? = nil, key: string? = nil)
+	fn init(icon: integer = 0, theme: ThemeData? = nil, onTap: Action? = nil, key: string? = nil)
 		self.super(key)
 
 		self.icon = icon
@@ -337,7 +338,7 @@ export class CalendarDay extends View
 	selected: boolean
 	cursor: boolean
 	theme: ThemeData
-	onTap: (fn() -> nil)?
+	onTap: Action?
 
 	fn init(
 		date: Date,
@@ -345,7 +346,7 @@ export class CalendarDay extends View
 		selected: boolean = false,
 		cursor: boolean = false,
 		theme: ThemeData? = nil,
-		onTap: (fn() -> nil)? = nil,
+		onTap: Action? = nil,
 		key: string? = nil
 	)
 		self.super(key)
@@ -439,7 +440,7 @@ end
 export class DateField extends View
 	value: Date?
 	placeholder: string
-	onChanged: (fn(Date) -> nil)?
+	onChanged: ValueChanged<Date>?
 	enabled: boolean
 	autofocus: boolean
 	width: float?
@@ -447,7 +448,7 @@ export class DateField extends View
 	fn init(
 		value: Date? = nil,
 		placeholder: string = "Pick a date…",
-		onChanged: (fn(Date) -> nil)? = nil,
+		onChanged: ValueChanged<Date>? = nil,
 		enabled: boolean = true,
 		autofocus: boolean = false,
 		width: float? = nil,
@@ -473,7 +474,7 @@ export class DateField extends View
 			origin.dy + context.size().height + 4.0,
 			self.value,
 			fn(picked: Date)
-				local changed: (fn(Date) -> nil)? = self.onChanged
+				local changed: ValueChanged<Date>? = self.onChanged
 
 				if changed != nil then
 					changed(picked)

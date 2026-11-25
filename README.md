@@ -1281,11 +1281,15 @@ tree and the next one settles back to zero.
   `EdgeInsets.all(8.0)`, `Size.zero()`): a static field initializer runs while
   its own class is still being declared, so it cannot reference that class.
   `Colors.primary` is a plain field because `Colors` is a separate class.
-- Callbacks carry their full signature — `onChanged: (fn(boolean) -> nil)?`,
-  not a bare `function`, which the language no longer has. The parentheses
-  matter: without them the `?` attaches to the return type, so
-  `fn(boolean) -> nil?` is a callback that is always present and returns a
-  nullable nothing, which is not what any of these slots mean.
+- Callbacks are typed by name. `core/Callbacks.sau` exports four aliases for
+  the signatures nearly every callback has: `Action` (`fn() -> nil`),
+  `ValueChanged<T>` (`fn(T) -> nil`), `PointAction`
+  (`fn(float, float) -> nil`) and `KeyHandler` (`fn(KeyEvent) -> boolean`).
+  An optional one is the alias and a `?`: `onChanged: ValueChanged<boolean>?`.
+  An alias and its signature are the same type, so a lambda fits either, and
+  an app may use the names for its own callbacks. Written out, an optional
+  callback needs parentheses — `(fn(boolean) -> nil)?` — because without
+  them the `?` attaches to the return type.
 - A modifier and a field can share a name. `Box` has a `padding` field *and*
   the inherited `.padding()` method; Saule keeps fields and methods in separate
   namespaces, so `self.padding` reads the field and `box.padding(4.0)` calls the

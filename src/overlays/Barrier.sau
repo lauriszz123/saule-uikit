@@ -8,6 +8,7 @@ from framework.Framework import *
 from Theme import *
 from animation.Animation import *
 from core.Tween import *
+from core.Callbacks import *
 from layout.Boxes import *
 from overlays.Manager import *
 
@@ -34,12 +35,12 @@ from overlays.Manager import *
 -- dialog usually doesn't.
 export class ModalBarrier extends SingleChildView
 	color: Color?
-	onDismiss: (fn() -> nil)?
+	onDismiss: Action?
 
 	fn init(
 		child: View? = nil,
 		color: Color? = nil,
-		onDismiss: (fn() -> nil)? = nil,
+		onDismiss: Action? = nil,
 		key: string? = nil
 	)
 		self.super(child, key)
@@ -79,7 +80,7 @@ export class ModalBarrier extends SingleChildView
 		end
 
 		if event.kind == PointerKind.Down then
-			local dismiss: (fn() -> nil)? = self.onDismiss
+			local dismiss: Action? = self.onDismiss
 
 			if dismiss != nil then
 				dismiss()

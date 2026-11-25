@@ -2,6 +2,7 @@ from shine import Clipboard
 from core.Geometry import *
 from core.TextStyle import *
 from core.Input import *
+from core.Callbacks import *
 from framework.Framework import *
 
 -- ============================================================================
@@ -38,9 +39,9 @@ end
 export class TextEngine
 	local scratch: table
 	local context: BuildContext
-	local onChanged: (fn(string) -> nil)?
+	local onChanged: ValueChanged<string>?
 
-	fn init(scratch: table, context: BuildContext, onChanged: (fn(string) -> nil)? = nil)
+	fn init(scratch: table, context: BuildContext, onChanged: ValueChanged<string>? = nil)
 		self.scratch = scratch
 		self.context = context
 		self.onChanged = onChanged
@@ -241,7 +242,7 @@ export class TextEngine
 
 	-- One place the owner is told about a change, rather than two.
 	local fn report(text: string) -> nil
-		local changed: (fn(string) -> nil)? = self.onChanged
+		local changed: ValueChanged<string>? = self.onChanged
 
 		if changed != nil then
 			changed(text)

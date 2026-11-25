@@ -4,6 +4,7 @@ from core.Color import *
 from core.TextStyle import *
 from core.ThemeData import *
 from core.Input import *
+from core.Callbacks import *
 from framework.Framework import *
 from Theme import *
 from animation.Animation import *
@@ -38,7 +39,7 @@ export class Slider extends View
 	min: float
 	max: float
 	step: float
-	onChanged: (fn(float) -> nil)?
+	onChanged: ValueChanged<float>?
 	enabled: boolean
 	autofocus: boolean
 	width: float?
@@ -48,7 +49,7 @@ export class Slider extends View
 		min: float = 0.0,
 		max: float = 1.0,
 		step: float = 0.0,
-		onChanged: (fn(float) -> nil)? = nil,
+		onChanged: ValueChanged<float>? = nil,
 		enabled: boolean = true,
 		autofocus: boolean = false,
 		width: float? = nil,
@@ -68,7 +69,7 @@ export class Slider extends View
 
 	-- Snap and clamp, then report — the one place a new value is produced.
 	local fn emit(raw: float) -> nil
-		local changed: (fn(float) -> nil)? = self.onChanged
+		local changed: ValueChanged<float>? = self.onChanged
 
 		if changed == nil or not self.enabled then
 			return
@@ -180,11 +181,11 @@ export class SliderTrack extends View
 	focused: boolean
 	hovered: boolean
 	theme: ThemeData
-	onSeek: (fn(float) -> nil)?
+	onSeek: ValueChanged<float>?
 
 	-- The track consumes the press itself, so focusing on click has to happen
 	-- here rather than in an enclosing `GestureArea` that never sees it.
-	onPress: (fn() -> nil)?
+	onPress: Action?
 
 	fn init(
 		fraction: float = 0.0,
@@ -192,8 +193,8 @@ export class SliderTrack extends View
 		focused: boolean = false,
 		hovered: boolean = false,
 		theme: ThemeData? = nil,
-		onSeek: (fn(float) -> nil)? = nil,
-		onPress: (fn() -> nil)? = nil,
+		onSeek: ValueChanged<float>? = nil,
+		onPress: Action? = nil,
 		key: string? = nil
 	)
 		self.super(key)
@@ -224,7 +225,7 @@ export class SliderTrack extends View
 			return
 		end
 
-		local callback: (fn(float) -> nil)? = self.onSeek
+		local callback: ValueChanged<float>? = self.onSeek
 
 		if callback != nil then
 			callback!(atLeastZero(atMost((x - 8.0) / usable, 1.0)))
@@ -243,7 +244,7 @@ export class SliderTrack extends View
 
 			el.data.dragging = true
 
-			local press: (fn() -> nil)? = self.onPress
+			local press: Action? = self.onPress
 			if press != nil then
 				press()
 			end

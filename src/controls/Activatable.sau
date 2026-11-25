@@ -2,11 +2,17 @@ from core.Color import *
 from core.TextStyle import *
 from core.ThemeData import *
 from core.Input import *
+from core.Callbacks import *
 from framework.Framework import *
 from gestures.Gesture import *
 from layout.Stacks import *
 from painting.Paint import *
 from Theme import *
+
+-- What a control looks like, given whether the pointer is over it, whether
+-- it holds the focus, and the theme. Private to this file: the controls
+-- built on `Activatable` pass a block and never name the type.
+type Visual = fn(boolean, boolean, ThemeData) -> View
 
 -- ============================================================================
 -- The activatable control
@@ -53,8 +59,8 @@ export class Activatable extends View
 	-- looks like and nothing here tests that.
 	local dimLabel: boolean
 
-	local onActivate: fn() -> nil
-	local visual: fn(boolean, boolean, ThemeData) -> View
+	local onActivate: Action
+	local visual: Visual
 
 	fn init(
 		label: string = "",
@@ -62,9 +68,9 @@ export class Activatable extends View
 		autofocus: boolean = false,
 		tracksHover: boolean = true,
 		dimLabel: boolean = true,
-		onActivate: fn() -> nil = () => nil,
+		onActivate: Action = () => nil,
 		key: string? = nil,
-		visual: fn(boolean, boolean, ThemeData) -> View = (hovered: boolean, focused: boolean, theme: ThemeData) => Text("")
+		visual: Visual = (hovered: boolean, focused: boolean, theme: ThemeData) => Text("")
 	)
 		self.super(key)
 
@@ -85,8 +91,8 @@ export class Activatable extends View
 		-- Bound to a local before the call: the checker does not infer a
 		-- return type through a call on a function-typed *field*, which is
 		-- why every callback in this kit is read into a local first.
-		local build: fn(boolean, boolean, ThemeData) -> View = self.visual
-		local activate: fn() -> nil = self.onActivate
+		local build: Visual = self.visual
+		local activate: Action = self.onActivate
 
 		local content: View = build(
 			scratch.hovered == true,
@@ -116,7 +122,7 @@ export class Activatable extends View
 			return row
 		end
 
-		local hover: (fn(boolean) -> nil)? = nil
+		local hover: ValueChanged<boolean>? = nil
 
 		if self.tracksHover then
 			hover = fn(inside: boolean)

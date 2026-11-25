@@ -4,6 +4,7 @@ from core.Color import *
 from core.TextStyle import *
 from core.ThemeData import *
 from core.Input import *
+from core.Callbacks import *
 from framework.Framework import *
 from Theme import *
 from animation.Animation import *
@@ -112,7 +113,7 @@ end
 -- One entry in a menu.
 export class MenuItem
 	label: string
-	onSelected: fn() -> nil
+	onSelected: Action
 	enabled: boolean
 
 	fn init(label: string = "", onSelected: fn() -> nil = () => nil, enabled: boolean = true)
@@ -181,7 +182,7 @@ export class MenuRow extends View
 			onTap: fn()
 				self.handle.dismiss()
 
-				local selected: (fn() -> nil)? = self.item.onSelected
+				local selected: Action? = self.item.onSelected
 				if selected != nil then
 					selected()
 				end
