@@ -99,6 +99,10 @@ local fn dispatchEvent(focus: FocusManager, root: Element, event: Event) -> nil
 			)
 		)
 
+
+		-- Asked to close, with the app deciding (`App.onCloseRequest`).
+		case Event.CloseRequested then AppLoop.closeRequested()
+
 		case _ then nil
 	end
 end
@@ -151,6 +155,12 @@ export fn runApp(
 		Display.setScale(Window.getScale())
 
 		rootElement.tick(Timer.getDelta())
+
+		-- A tick may have closed the window; see the same after the
+		-- handlers, below.
+		if not Window.isOpen() then
+			break
+		end
 
 		-- An animation ticking marks its element dirty, so asking before the
 		-- flush is what catches it — afterwards the list is empty again.
@@ -215,9 +225,18 @@ export fn runApp(
 			end
 		end
 
+		-- A handler may have closed the window outright (`Window.close()`
+		-- where `App.quit()` was meant). There is nothing left to lay out
+		-- or paint into: the frame ends here, and the loop with it.
+		if not Window.isOpen() then
+			break
+		end
+
 		-- A handler may have called `setState`; rebuild before painting so the
 		-- click is visible on this frame rather than the next one.
-		if owner.hasPendingWork() then
+		local rebuilt: boolean = owner.hasPendingWork()
+
+		if rebuilt then
 			needsPaint = true
 		end
 
@@ -232,6 +251,16 @@ export fn runApp(
 		-- Relayout boundaries make this nearly free: with nothing dirty it is one
 		-- comparison at the root.
 		rootElement.layout(Constraints.tight(logical))
+
+		-- That rebuild can have taken away what had the keyboard and brought
+		-- a field that wants it (a button clicked, and the next page has a
+		-- text field with `autofocus`). Focus is settled now, not on the next
+		-- frame that happens to have input: by then the first key typed has
+		-- already been read with text input still off, and its character is
+		-- lost. Free when the tree did not change.
+		if rebuilt then
+			focus.refresh(rootElement)
+		end
 
 		-- A caret or an indeterminate bar animates inside `paint` off the
 		-- clock, with no rebuild behind it. The previous frame's paint is what
@@ -271,6 +300,20 @@ end
 -- in, and stops before the next.
 export class AppLoop
 	static local stopping: boolean = false
+
+	-- What is asked before the window closes: true lets it close, false
+	-- keeps it open (the app is asking about unsaved changes, and quits
+	-- itself once it has its answer). Set with `App.onCloseRequest`.
+	static closing: (fn() -> boolean)? = nil
+
+	-- The window was asked to close.
+	static fn closeRequested() -> nil
+		local ask = AppLoop.closing
+
+		if ask == nil or ask!() then
+			AppLoop.stopping = true
+		end
+	end
 
 	-- End the app after this frame.
 	static fn quit() -> nil

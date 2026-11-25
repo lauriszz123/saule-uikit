@@ -1,3 +1,4 @@
+from shine import Window
 from core.Geometry import *
 from core.Color import *
 from core.Callbacks import *
@@ -123,5 +124,24 @@ export class App
 	-- returns. Safe from anywhere, a key handler included.
 	static fn quit() -> nil
 		AppLoop.quit()
+	end
+
+	-- Be asked before the window closes. `ask` returns true to let it
+	-- close, or false to keep it open: an app with changes not saved shows
+	-- its question and calls `App.quit()` when it has been answered.
+	--
+	--     App.onCloseRequest(fn() -> boolean
+	--         if not document.edited() then
+	--             return true
+	--         end
+	--         askToSave()
+	--         return false
+	--     end)
+	--
+	-- Under Saule's own window manager. A window on another desktop is
+	-- closed by that desktop, and `ask` is not called.
+	static fn onCloseRequest(ask: fn() -> boolean) -> nil
+		AppLoop.closing = ask
+		Window.holdClose(true)
 	end
 end

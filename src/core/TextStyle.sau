@@ -65,19 +65,62 @@ export class TextStyle
 	color: Color
 	size: float?
 
+	-- A typeface of its own: a font file's path, or nil for the system's.
+	-- `TextStyle.fixedFace()` finds one whose characters are all one
+	-- width, for code and for columns that must line up.
+	face: string?
+
 	static local fonts: table<string, Font> = {}
 
-	fn init(color: Color? = nil, size: float? = nil)
+	-- Where systems keep a fixed-width face, in the order tried.
+	static local fixedFaces: table<string> = {
+		"/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+		"/usr/share/fonts/TTF/DejaVuSansMono.ttf",
+		"/usr/share/fonts/dejavu/DejaVuSansMono.ttf",
+		"/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+		"/usr/share/fonts/liberation-mono/LiberationMono-Regular.ttf",
+		"/usr/share/fonts/truetype/ubuntu/UbuntuMono-R.ttf",
+		"/System/Library/Fonts/Monaco.ttf",
+		"/System/Library/Fonts/Supplemental/Courier New.ttf",
+		"C:\\Windows\\Fonts\\consola.ttf",
+		"C:\\Windows\\Fonts\\cour.ttf"
+	}
+
+	static local fixedFound: boolean = false
+	static local fixedPath: string? = nil
+
+	fn init(color: Color? = nil, size: float? = nil, face: string? = nil)
 		self.color = color ?? Colors.text
 		self.size = size
+		self.face = face
 	end
 
 	fn withColor(color: Color) -> TextStyle
-		return TextStyle(color, self.size)
+		return TextStyle(color, self.size, self.face)
 	end
 
 	fn withSize(size: float) -> TextStyle
-		return TextStyle(self.color, size)
+		return TextStyle(self.color, size, self.face)
+	end
+
+	fn withFace(face: string?) -> TextStyle
+		return TextStyle(self.color, self.size, face)
+	end
+
+	-- The path of a fixed-width face this system has, or nil when it has
+	-- none of those known: looked for once.
+	static fn fixedFace() -> string?
+		if not TextStyle.fixedFound then
+			TextStyle.fixedFound = true
+
+			for path: string in TextStyle.fixedFaces do
+				if TextStyle.fixedPath == nil and Os.exists(path) then
+					TextStyle.fixedPath = path
+				end
+			end
+		end
+
+		return TextStyle.fixedPath
 	end
 
 	-- Bind the font this style asks for.
@@ -103,11 +146,23 @@ export class TextStyle
 		-- magnified by the root transform is blurry, and type is the one thing
 		-- that shows it immediately.
 		local physical: float = size! * scale
-		local key: string = String.format("%.2f", physical)
+		local face: string? = self.face
+		local key: string = String.format("%.2f", physical) .. (face ?? "")
 		local cached = fonts[key]
 
 		if cached == nil then
 			local created: Font = Graphics.newFont(physical)
+
+			if face != nil then
+				-- A face that can't be loaded is the system's instead:
+				-- text in the wrong typeface, not none.
+				try
+					created = Graphics.newFont(physical, face!)
+				catch e: string
+					created = Graphics.newFont(physical)
+				end
+			end
+
 			fonts[key] = created
 			Graphics.setFont(created)
 		else
