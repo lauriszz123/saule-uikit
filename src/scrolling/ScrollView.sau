@@ -48,6 +48,10 @@ export class Viewport extends SingleChildView
 		-- of unknown height does.
 		local size: Size = constraints.biggest()
 
+		-- So the controller can have the content placed again when the
+		-- offset moves, without anything being rebuilt.
+		self.controller.viewport = el
+
 		if child == nil then
 			return size
 		end
@@ -62,12 +66,22 @@ export class Viewport extends SingleChildView
 
 		local content: Size = child!.layout(inner)
 
+		-- The content is placed a whole number of the screen's pixels from
+		-- where it started, though a glide passes through every fraction
+		-- between. Moved by part of a pixel, every shape and every line of
+		-- text in it is a new picture, to be worked out again; moved by whole
+		-- pixels it is the picture already drawn, somewhere else — which is
+		-- what makes a scroll cost a frame's drawing and nothing more. It is
+		-- also what keeps text sharp while it moves.
+		local scale: float = Display.scale()
+		local shown: float = (Math.floor(self.controller.offset * scale + 0.5) as float) / scale
+
 		if vertical then
 			self.controller.setExtent(content.height - size.height)
-			child!.offset = Offset(0.0, -self.controller.offset)
+			child!.offset = Offset(0.0, -shown)
 		else
 			self.controller.setExtent(content.width - size.width)
-			child!.offset = Offset(-self.controller.offset, 0.0)
+			child!.offset = Offset(-shown, 0.0)
 		end
 
 		return size
@@ -131,9 +145,9 @@ export class ScrollView extends View
 	end
 
 	-- Carries a wheel glide forward, and picks up any other move the offset
-	-- made. The offset is read during layout, so the view has to be rebuilt for
-	-- a new one to show — which is why this marks itself dirty rather than
-	-- asking for a repaint.
+	-- made. The offset is read during the viewport's layout, so that is what
+	-- has to run again for a new one to show (`ScrollController.shift`); the
+	-- view is only rebuilt when there is no viewport yet.
 	fn tick(el: Element, dt: float) -> nil
 		local supplied: ScrollController? = self.controller
 		local controller: ScrollController = controllerFor(el.data)
@@ -153,7 +167,7 @@ export class ScrollView extends View
 			moved = true
 		end
 
-		if moved then
+		if moved and not controller.shift() then
 			el.markNeedsBuild()
 		end
 	end
@@ -209,7 +223,9 @@ export class ScrollView extends View
 				-- Only claim the wheel if the offset actually moved; at either
 				-- end, an enclosing scroll view should get it instead.
 				if controller.takeDirty() then
-					context.markNeedsBuild()
+					if not controller.shift() then
+						context.markNeedsBuild()
+					end
 
 					return true
 				end

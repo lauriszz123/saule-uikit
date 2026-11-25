@@ -4,6 +4,7 @@ from core.TextStyle import *
 from core.ThemeData import *
 from core.Input import *
 from framework.Framework import *
+from framework.Diagnostics import *
 from Theme import *
 from animation.Animation import *
 from core.Tween import *
@@ -48,6 +49,10 @@ export class ScrollController
 	maxOffset: float
 
 	local dirty: boolean
+
+	-- The viewport showing this offset, once it has been laid out: what has
+	-- to be placed again when the offset moves (see `shift`).
+	viewport: Element?
 	local glide: Tracker
 
 	fn init(offset: float = 0.0)
@@ -55,6 +60,7 @@ export class ScrollController
 		self.target = offset
 		self.maxOffset = 0.0
 		self.dirty = false
+		self.viewport = nil
 		self.glide = Tracker(value: offset, duration: 0.18, easing: EasingTypes.OutCubic)
 	end
 
@@ -152,6 +158,24 @@ export class ScrollController
 		end
 
 		return self.offset / self.maxOffset
+	end
+
+	-- Show the offset as it is now: the viewport places its content again
+	-- and the frame is drawn again. Nothing is rebuilt and nothing inside
+	-- the content is laid out again — it is the same content, somewhere
+	-- else — which is what a scroll step should cost. False before there is
+	-- a viewport to do it, when the caller rebuilds instead.
+	fn shift() -> boolean
+		local viewport: Element? = self.viewport
+
+		if viewport == nil then
+			return false
+		end
+
+		viewport!.markNeedsLayout()
+		Repaint.request()
+
+		return true
 	end
 
 	fn takeDirty() -> boolean
