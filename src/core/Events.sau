@@ -1,4 +1,4 @@
-from shine import Window
+from shine import Timer, Window
 
 -- ============================================================================
 -- Input events
@@ -181,6 +181,42 @@ export fn decodeEvent(record: table) -> Event?
 	end
 end
 
+-- When somebody last did something to the program: pressed or let go of a
+-- key, typed, moved the pointer, pressed a button or turned the wheel. What
+-- a program that does something when left alone goes by: a screen that
+-- dims, a session that locks.
+export class Activity
+	-- The moment of it, on the engine's clock (`Timer.getTime`): when the
+	-- program started, until there is one.
+	static at: float = Timer.getTime()
+
+	-- How long ago that was, in seconds.
+	static fn idle() -> float
+		return Timer.getTime() - Activity.at
+	end
+
+	-- Count now as such a moment: for what is somebody's doing and no event
+	-- (a lid opened).
+	static fn touch() -> nil
+		Activity.at = Timer.getTime()
+	end
+
+	-- Whether `event` is somebody's doing, and not the window's (resized,
+	-- closed, the pointer carried out of it).
+	static fn isOne(event: Event) -> boolean
+		match event
+			case Event.KeyPressed(_, _, _, _) then return true
+			case Event.KeyReleased(_, _, _, _) then return true
+			case Event.TextInput(_) then return true
+			case Event.MouseMoved(_, _, _, _) then return true
+			case Event.MousePressed(_, _, _) then return true
+			case Event.MouseReleased(_, _, _) then return true
+			case Event.WheelMoved(_, _) then return true
+			case _ then return false
+		end
+	end
+end
+
 -- Pump the OS queue and return this frame's events, decoded.
 --
 -- This is the only place the raw engine call belongs; everything else in the
@@ -193,6 +229,9 @@ export fn pollEvents() -> table<Event>
 
 		if decoded != nil then
 			out[#out + 1] = decoded!
+			if Activity.isOne(decoded!) then
+				Activity.touch()
+			end
 		end
 	end
 

@@ -839,6 +839,21 @@ Key names are the engine's: `"ctrl"` is Ctrl, `"alt"` Alt, `"shift"` Shift,
 `"f5"` F5). `"super"`, the logo key, is drawn as Saule's sun, and the arrow keys
 as arrows (`KeyCap`), so no font needs those symbols.
 
+## Left alone
+
+`Activity` says when somebody last did something to the program: pressed
+or let go of a key, typed, moved the pointer, pressed a button or turned
+the wheel. `Activity.idle()` is how many seconds ago that was, and
+`Activity.touch()` counts now as such a moment. It is what a program that
+does something when left alone goes by: saule-wm dims the screen and locks
+it.
+
+```saule
+if Activity.idle() > 120.0 then
+	dim()
+end
+```
+
 ## Data: grids and tables
 
 ```saule
