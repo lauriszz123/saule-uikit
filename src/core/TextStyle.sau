@@ -306,54 +306,23 @@ export class TextStyle
 	--
 	-- The first entry is always 1, so the result is never empty.
 	fn wrapIndices(text: string, maxWidth: float, softWrap: boolean = true) -> table<integer>
-		local starts: table<integer> = {1}
-		local length: integer = String.len(text)
-
-		if length == 0 then
-			return starts
+		if String.len(text) == 0 then
+			return {1}
 		end
 
-		local lineStart: integer = 1
-		-- Last index a break could go at, i.e. after the most recent space.
-		local lastBreak: integer = 0
-		local i: integer = 1
+		-- Shine walks the text once, adding each character's width to the
+		-- line's: measuring the line so far for every character, from
+		-- here, is a call into Shine a character, and seconds for a page
+		-- of text on a slow machine.
+		self.applyFont()
 
-		while i <= length do
-			local ch: string = String.sub(text, i, i)
+		local limit: float = maxWidth
 
-			if ch == "\n" then
-				starts[#starts + 1] = i + 1
-				lineStart = i + 1
-				lastBreak = 0
-			else
-				if ch == " " then
-					lastBreak = i
-				end
-
-				if softWrap and maxWidth < Math.huge then
-					local width: float = self.measure(String.sub(text, lineStart, i)).width
-
-					if width > maxWidth and i > lineStart then
-						-- Break after the last space if there was one, otherwise
-						-- mid-word rather than overflowing forever.
-						local at: integer = i
-
-						if lastBreak > lineStart then
-							at = lastBreak + 1
-						end
-
-						starts[#starts + 1] = at
-						lineStart = at
-						lastBreak = 0
-						i = at - 1
-					end
-				end
-			end
-
-			i = i + 1
+		if maxWidth < Math.huge then
+			limit = maxWidth * self.fontScale()
 		end
 
-		return starts
+		return Graphics.getWrapStarts(text, limit, softWrap)
 	end
 
 	-- The caret index closest to `x` pixels into `text` — what a click on a text

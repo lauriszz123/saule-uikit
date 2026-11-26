@@ -58,31 +58,47 @@ export class EditableParagraph extends View
 
 	-- The map is rebuilt only when the text or the width changes; a caret move
 	-- is far more common than an edit, and it doesn't affect line structure.
+	-- The text is compared as it is, not written into a key first: a long
+	-- document copied into a string every frame is most of that frame.
 	fn mapFor(el: Element, maxWidth: float) -> LineMap
-		local signature: string = String.format("%s|%.1f", self.text, maxWidth)
-		local cached: LineMap? = el.data.scratch.map as LineMap
-
-		if el.data.scratch.mapKey != signature or cached == nil then
+		local scratch: table = el.data.scratch
+		local cached: LineMap? = scratch.map as LineMap
+		local same: boolean = scratch.mapWidth == maxWidth and scratch.mapWrap == self.softWrap
+		if cached == nil or not same or scratch.mapText != self.text or scratch.mapSize != self.resolved().size then
 			local made: LineMap = LineMap(self.text, self.resolved(), maxWidth, self.softWrap)
-
-			el.data.scratch.mapKey = signature
-			el.data.scratch.map = made
+			scratch.mapText = self.text
+			scratch.mapWidth = maxWidth
+			scratch.mapWrap = self.softWrap
+			scratch.mapSize = self.resolved().size
+			scratch.map = made
+			scratch.widest = nil
 			return made
 		end
-
 		return cached!
+	end
+
+	-- How wide the widest line is: worked out once for a text and a width,
+	-- in one measuring of the whole text (which says its widest line as
+	-- written; wrapped, no line is wider than the width wrapped at) rather
+	-- than a measuring of every line, every layout.
+	local fn widestLine(el: Element, maxWidth: float) -> float
+		local scratch: table = el.data.scratch
+		local known: float? = scratch.widest as float?
+		if known != nil then
+			return known!
+		end
+		local widest: float = self.resolved().measure(self.text).width
+		if self.softWrap and widest > maxWidth then
+			widest = maxWidth
+		end
+		scratch.widest = widest
+		return widest
 	end
 
 	fn layout(el: Element, constraints: Constraints) -> Size
 		local style: TextStyle = self.resolved()
 		local map: LineMap = self.mapFor(el, constraints.maxWidth)
-		local widest: float = 0.0
-		local i: integer = 1
-
-		while i <= map.count() do
-			widest = atLeast(widest, style.measure(map.textOf(i)).width)
-			i = i + 1
-		end
+		local widest: float = self.widestLine(el, constraints.maxWidth)
 
 		if #self.text == 0 and #self.placeholder > 0 then
 			widest = atLeast(widest, style.measure(self.placeholder).width)
@@ -91,6 +107,9 @@ export class EditableParagraph extends View
 		return constraints.constrain(Size(widest, style.lineHeight() * (map.count() as float)))
 	end
 
+	-- Only the lines that can be seen are drawn: those inside what is being
+	-- drawn into (a scroll view's window onto the text, which is the clip).
+	-- A long document is thousands of lines, a window forty of them.
 	fn paint(el: Element, x: float, y: float) -> nil
 		local style: TextStyle = self.resolved()
 		local map: LineMap = self.mapFor(el, el.size.width)
@@ -101,21 +120,24 @@ export class EditableParagraph extends View
 			hint.draw(self.placeholder, x, y)
 		end
 
+		local sx: float, sy: float, sw: float, sh: float = Graphics.getScissor()
+		local count: integer = map.count()
+		local first: integer = Math.clamp(Math.floor((sy - y) / height) + 1, 1, count)
+		local last: integer = Math.clamp(Math.floor((sy + sh - y) / height) + 1, first, count)
+
 		-- Selection first, so the glyphs land on top of it.
 		if self.caret != self.anchor then
-			self.paintSelection(map, style, x, y, height)
+			self.paintSelection(map, style, x, y, height, first, last)
 		end
 
-		local i: integer = 1
-
-		while i <= map.count() do
+		local i: integer = first
+		while i <= last do
 			style.draw(map.textOf(i), x, y + height * ((i - 1) as float))
 			i = i + 1
 		end
 
 		if self.caretVisible and self.caret == self.anchor and blinkOn() then
 			local at: Offset = map.pointAt(self.caret)
-
 			style.apply()
 			Graphics.setLineWidth(1.0)
 			Graphics.line(x + at.dx, y + at.dy + 1.0, x + at.dx, y + at.dy + height - 1.0)
@@ -124,7 +146,16 @@ export class EditableParagraph extends View
 
 	-- One rectangle per line the selection touches: full width in the middle,
 	-- partial at the two ends.
-	local fn paintSelection(map: LineMap, style: TextStyle, x: float, y: float, height: float) -> nil
+	-- Of the lines `top` to `bottom`, which are the ones on screen.
+	local fn paintSelection(
+		map: LineMap,
+		style: TextStyle,
+		x: float,
+		y: float,
+		height: float,
+		top: integer,
+		bottom: integer
+	) -> nil
 		local first: integer = self.caret
 		local last: integer = self.anchor
 
@@ -137,9 +168,9 @@ export class EditableParagraph extends View
 		local lastLine: integer = map.lineAt(last)
 		local wash: Color = self.selectionColor ?? Colors.primary.withAlpha(0.35)
 
-		local line: integer = firstLine
+		local line: integer = Math.max(firstLine, top)
 
-		while line <= lastLine do
+		while line <= Math.min(lastLine, bottom) do
 			local start: integer = map.startOf(line)
 			local stop: integer = map.endOf(line)
 			local runStart: integer = start - 1

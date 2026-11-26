@@ -1,0 +1,308 @@
+from shine import Graphics, Canvas, Shader
+from core.Geometry import *
+
+-- ============================================================================
+-- Blur
+-- ============================================================================
+
+-- Blurring what is already drawn under a rectangle: what a frosted panel
+-- (`Backdrop`) shows of what is behind it.
+--
+-- An effect of uikit's own, written against Shine as any program's would
+-- be: Shine draws images, shapes and text, and gives a program two things
+-- to make effects of, a shader of its own (`Graphics.newShader`) and what
+-- is on the target as an image (`Graphics.capture`). The blur here is
+-- those two put together:
+--
+--   1. what is under the rectangle is captured at half its size;
+--   2. that is drawn into an image half its size again, and that into
+--      one half the size again, each time through `soften`, which makes
+--      a pixel of the five round it: the further down, the wider the
+--      blur, at a quarter of the pixels each step;
+--   3. the same back up, a size at a time, softened the same;
+--   4. the half-size result is drawn back over the rectangle through
+--      `paste`, which keeps it inside the rounded corners and fades it.
+--
+-- Five reads of the image a pixel, at places worked out once a corner:
+-- shaders small enough for the oldest graphics chips there are (see the
+-- notes with `Graphics.newShader`).
+--
+-- Where there is no shader to be had (the processor is drawing) nothing
+-- is blurred and `draw` says so; a panel shows a plainer glass then.
+export class Blur
+	-- The shaders, once they have been asked for; nil where there are none.
+	static local tried: boolean = false
+	static local soften: Shader? = nil
+	static local paste: Shader? = nil
+
+	-- Why there is no blur, when there is none: Shine's words.
+	static problem: string = ""
+
+	-- Inside `work`, between saving the drawing state and restoring it.
+	static local pushed: boolean = false
+
+	-- The images a blur works in, by their size and how many there are of
+	-- them, kept from one frame to the next; and the order they were last
+	-- wanted in, the first to go when there are too many.
+	static local kept: table<string, table<Canvas>> = {}
+	static local wanted: table<string> = {}
+	static local most: integer = 10
+
+	-- Each pixel of the five round it: itself four times, and the four
+	-- diagonally out by `reach` of its pixels.
+	static local fn softenSource() -> string
+		return String.join("\n", {
+			"uniform float reach;",
+			"varying vec2 tapA;",
+			"varying vec2 tapB;",
+			"varying vec2 tapC;",
+			"varying vec2 tapD;",
+			"#ifdef VERTEX",
+			"void vertex(vec2 uv, vec2 pixel) {",
+			"    vec2 by = texel * reach;",
+			"    tapA = uv - by;",
+			"    tapB = uv + by;",
+			"    tapC = uv + vec2(by.x, -by.y);",
+			"    tapD = uv - vec2(by.x, -by.y);",
+			"}",
+			"#endif",
+			"#ifdef PIXEL",
+			"vec4 effect(vec4 colour, sampler2D image, vec2 uv, vec2 pixel) {",
+			"    vec4 round = Texel(image, tapA) + Texel(image, tapB) + Texel(image, tapC) + Texel(image, tapD);",
+			"    return (Texel(image, uv) * 4.0 + round) * 0.125;",
+			"}",
+			"#endif",
+		})
+	end
+
+	-- Back onto what it was taken from: inside the rectangle's rounded
+	-- corners, as much of it as the colour is opaque, less toward the
+	-- bottom where it fades. `extent` is the rectangle's size, `scale`
+	-- how many of its units one pixel of the image is.
+	static local fn pasteSource() -> string
+		return String.join("\n", {
+			"uniform vec2 extent;",
+			"uniform vec2 scale;",
+			"uniform float radius;",
+			"uniform float fading;",
+			"#ifdef PIXEL",
+			"vec4 effect(vec4 colour, sampler2D image, vec2 uv, vec2 pixel) {",
+			"    vec2 p = pixel * scale;",
+			"    vec2 off = p - clamp(p, vec2(radius), extent - radius);",
+			"    float cornered = sign(abs(off.x)) * sign(abs(off.y));",
+			"    float cover = mix(1.0, clamp(radius - length(off) + 0.5, 0.0, 1.0), cornered);",
+			"    float left = clamp((extent.y - p.y) * fading, 0.0, 1.0);",
+			"    return vec4(Texel(image, uv).rgb, cover * left * colour.a);",
+			"}",
+			"#endif",
+		})
+	end
+
+	-- Whether there is a blur to be had here: asked of Shine once.
+	static fn ready() -> boolean
+		if not Blur.tried then
+			Blur.tried = true
+			Blur.soften = Graphics.newShader(Blur.softenSource())
+			if Blur.soften != nil then
+				Blur.paste = Graphics.newShader(Blur.pasteSource())
+			end
+			if Blur.soften == nil or Blur.paste == nil then
+				Blur.problem = Graphics.getShaderProblem()
+			end
+		end
+		return Blur.soften != nil and Blur.paste != nil
+	end
+
+	-- Blur what is drawn under the rectangle at (`x`, `y`), `w` by `h` in
+	-- the current coordinates: pixels within about `radius` of each other
+	-- mix. `corner` rounds the rectangle's corners, `opacity` shows that
+	-- much of the blur over what was there, and `fade` melts it away over
+	-- that much of the rectangle's bottom. False where nothing was done:
+	-- there is no shader here.
+	static fn draw(
+		x: float,
+		y: float,
+		w: float,
+		h: float,
+		radius: float,
+		corner: float = 0.0,
+		opacity: float = 1.0,
+		fade: float = 0.0
+	) -> boolean
+		if not Blur.ready() then
+			return false
+		end
+		if w <= 0.0 or h <= 0.0 or opacity <= 0.0 then
+			return true
+		end
+		-- Whatever goes wrong in it (a graphics chip that takes the shaders
+		-- and then not what is asked of it), what is being drawn is left as
+		-- it was found, and there is no blur from then on: a plainer panel,
+		-- not a program that stops.
+		local target: Canvas? = Graphics.getCanvas()
+		Blur.pushed = false
+		try
+			Blur.work(x, y, w, h, radius, corner, opacity, fade, target)
+		catch e: string
+			Graphics.setShader()
+			if target != nil then
+				Graphics.setCanvas(target!)
+			else
+				Graphics.setCanvas()
+			end
+			if Blur.pushed then
+				Graphics.pop()
+			end
+			Graphics.setColor(1.0, 1.0, 1.0, 1.0)
+			Blur.problem = e
+			Blur.soften = nil
+			Blur.paste = nil
+			return false
+		end
+		return true
+	end
+
+	-- The blur itself (see `draw`, which looks after what it leaves behind
+	-- if any of it fails).
+	static local fn work(
+		x: float,
+		y: float,
+		w: float,
+		h: float,
+		radius: float,
+		corner: float,
+		opacity: float,
+		fade: float,
+		target: Canvas?
+	) -> nil
+		-- How many of the target's pixels one of the units given is, by
+		-- where the current coordinates put two points one apart.
+		local ax: float, ay: float = Graphics.transformPoint(0.0, 0.0)
+		local bx: float, by: float = Graphics.transformPoint(1.0, 0.0)
+		local density: float = Math.sqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay))
+		local reach: float = radius * density
+		if reach < 0.5 then
+			return
+		end
+
+		-- How far down to go: each size down doubles how far the blur
+		-- reaches, from a little under a pixel at half size.
+		local sigma: float = reach / 3.0
+		local levels: integer = 1
+		local covered: float = 1.6
+		while levels < 5 and covered * 1.4 < sigma do
+			levels = levels + 1
+			covered = covered * 2.0
+		end
+		local spread: float = Math.clamp(sigma / covered, 0.6, 1.6)
+
+		-- Half the rectangle's pixels each way, in sixteens: a panel that
+		-- grows a little, as one does coming onto the screen, keeps its
+		-- images.
+		local wide: integer = Blur.sized(w * density / 2.0)
+		local high: integer = Blur.sized(h * density / 2.0)
+		local images: table<Canvas> = Blur.imagesFor(wide, high, levels)
+		local soften: Shader = Blur.soften!
+		local paste: Shader = Blur.paste!
+
+		Graphics.capture(images[1], x, y, w, h)
+
+		Graphics.push("all")
+		Blur.pushed = true
+		Graphics.origin()
+		Graphics.setScissor()
+		Graphics.setBlendMode("replace")
+		Graphics.setColor(1.0, 1.0, 1.0, 1.0)
+		soften.send("reach", spread)
+		Graphics.setShader(soften)
+		for i: integer = 2, #images do
+			Blur.pass(images[i - 1], images[i])
+		end
+		for i: integer = #images - 1, 1, -1 do
+			Blur.pass(images[i + 1], images[i])
+		end
+		Graphics.setShader()
+		if target != nil then
+			Graphics.setCanvas(target!)
+		else
+			Graphics.setCanvas()
+		end
+		Graphics.pop()
+		Blur.pushed = false
+
+		-- Back over the rectangle, in the coordinates it was given in.
+		local fading: float = 1000000.0
+		if fade > 0.0 then
+			fading = 1.0 / fade
+		end
+		paste.send("extent", w, h)
+		paste.send("scale", w / (wide as float), h / (high as float))
+		paste.send("radius", Math.min(corner, Math.min(w, h) / 2.0))
+		paste.send("fading", fading)
+		Graphics.setShader(paste)
+		Graphics.setColor(1.0, 1.0, 1.0, Math.min(opacity, 1.0))
+		Graphics.draw(images[1], x, y, 0.0, w / (wide as float), h / (high as float))
+		Graphics.setColor(1.0, 1.0, 1.0, 1.0)
+		Graphics.setShader()
+	end
+
+	-- `source` drawn over the whole of `into`, through the shader that
+	-- is set.
+	static local fn pass(source: Canvas, into: Canvas) -> nil
+		Graphics.setCanvas(into)
+		Graphics.draw(
+			source,
+			0.0,
+			0.0,
+			0.0,
+			(into.getWidth() as float) / (source.getWidth() as float),
+			(into.getHeight() as float) / (source.getHeight() as float)
+		)
+	end
+
+	-- A length in pixels as an image's: whole, in sixteens, at least one.
+	static local fn sized(pixels: float) -> integer
+		local sixteens: integer = Math.ceil(pixels / 16.0)
+		return Math.max(sixteens, 1) * 16
+	end
+
+	-- The images for a blur whose first is `wide` by `high`: `levels` of
+	-- them, each half the one before, down to no less than four pixels.
+	static local fn imagesFor(wide: integer, high: integer, levels: integer) -> table<Canvas>
+		local key: string = wide .. "x" .. high .. "/" .. levels
+		local found: table<Canvas>? = Blur.kept[key]
+		-- Wanted last, whichever it was.
+		local order: table<string> = {}
+		for known: string in Blur.wanted do
+			if known != key then
+				Table.insert(order, known)
+			end
+		end
+		Table.insert(order, key)
+		Blur.wanted = order
+		if found != nil then
+			return found!
+		end
+
+		local images: table<Canvas> = {}
+		local w: integer = wide
+		local h: integer = high
+		for i: integer = 1, levels do
+			Table.insert(images, Graphics.newCanvas(w, h))
+			if w <= 4 or h <= 4 then
+				break
+			end
+			w = Math.max(w / 2, 4)
+			h = Math.max(h / 2, 4)
+		end
+		Blur.kept[key] = images
+		-- The one wanted longest ago goes; Shine frees its images once
+		-- nothing holds them.
+		while #Blur.wanted > Blur.most do
+			local oldest: string = Blur.wanted[1]
+			Table.remove(Blur.wanted, 1)
+			Blur.kept[oldest] = nil
+		end
+		return images
+	end
+end

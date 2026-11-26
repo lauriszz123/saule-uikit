@@ -2,6 +2,7 @@ from shine import Graphics
 from core.Geometry import *
 from core.Color import *
 from framework.Framework import *
+from painting.Blur import *
 
 -- ============================================================================
 -- Frosted glass
@@ -9,8 +10,9 @@ from framework.Framework import *
 
 -- A panel that blurs what is behind it, as a frosted glass pane does, with
 -- an optional tint over the blur and rounded corners; its child is drawn on
--- top. The blur is Shine's `Graphics.blur`: a Gaussian blur, on the GPU
--- where Shine draws on one.
+-- top. The blur is uikit's own (`Blur`): a shader, where the graphics
+-- chip draws. Where the processor draws there is none, and the tint is
+-- laid on thicker, so that what is on the panel can still be read.
 --
 --     Backdrop(
 --         blur: 30.0,
@@ -19,7 +21,7 @@ from framework.Framework import *
 --         child: content
 --     )
 --
--- `blur` is how far pixels mix, in pixels (at most 64 on the screen).
+-- `blur` is how far pixels mix, in pixels.
 -- `fade` melts the glass into what is under it: over that many pixels up
 -- from its bottom edge, blur and tint both fade out to nothing, as a bar
 -- along the top of a screen does.
@@ -54,6 +56,13 @@ export class Backdrop extends SingleChildView
 		self.fade = fade
 	end
 
+	-- A panel is in front of what it blurs, for the pointer as well: a
+	-- text field under it does not turn the pointer into a text cursor
+	-- through it, and nothing under it lights up as the pointer crosses.
+	fn occludes(el: Element) -> boolean
+		return true
+	end
+
 	fn paint(el: Element, x: float, y: float) -> nil
 		local w: float = el.size.width
 		local h: float = el.size.height
@@ -68,10 +77,20 @@ export class Backdrop extends SingleChildView
 
 		local tint: Color? = self.tint
 		if tint != nil then
-			Backdrop.tintOver(tint!, x, y, w, h, self.radius, self.fade)
+			Backdrop.tintOver(Backdrop.thick(tint!), x, y, w, h, self.radius, self.fade)
 		end
 
 		el.paintChildren(x, y)
+	end
+
+	-- The tint as it is laid on: as given over a blur, and with less than
+	-- half of what is behind showing through where there is no blur to
+	-- soften it.
+	static fn thick(tint: Color) -> Color
+		if Blur.ready() then
+			return tint
+		end
+		return tint.withAlpha(1.0 - (1.0 - tint.a) * 0.4)
 	end
 
 	-- `tint` over the rectangle, fading out over `fade` pixels up from its
@@ -147,7 +166,7 @@ export class BackdropArea
 	fn draw(opacity: float = 1.0, aboutX: float = 0.0, aboutY: float = 0.0, scale: float = 1.0) -> nil
 		local x: float = aboutX + (self.x - aboutX) * scale
 		local y: float = aboutY + (self.y - aboutY) * scale
-		Graphics.blur(
+		Blur.draw(
 			x,
 			y,
 			self.w * scale,
