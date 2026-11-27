@@ -6,6 +6,7 @@ from core.ThemeData import *
 from core.Input import *
 from core.Callbacks import *
 from framework.Framework import *
+from framework.Diagnostics import *
 from Theme import *
 from gestures.Gesture import *
 from layout.Boxes import *
@@ -92,8 +93,18 @@ export class Viewport extends SingleChildView
 		-- Clip at the viewport edge; the child is already offset out of view.
 		local sx: float, sy: float, sw: float, sh: float = Graphics.getScissor()
 
+		-- And say so, so that what the clip would throw away is not painted
+		-- in the first place (`PaintClip`).
+		local active: boolean = PaintClip.active
+		local left: float = PaintClip.left
+		local top: float = PaintClip.top
+		local right: float = PaintClip.right
+		local bottom: float = PaintClip.bottom
+
 		Graphics.intersectScissor(x, y, el.size.width, el.size.height)
+		PaintClip.narrow(x, y, el.size.width, el.size.height)
 		el.paintChildren(x, y)
+		PaintClip.restore(active, left, top, right, bottom)
 		Graphics.setScissor(sx, sy, sw, sh)
 	end
 end

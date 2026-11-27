@@ -60,6 +60,7 @@ export from overlays.Toast import *
 export from scrolling.Controller import *
 export from scrolling.ScrollBar import *
 export from scrolling.ScrollView import *
+export from scrolling.Lazy import *
 
 -- Text: the engine and line mapping first, then the widgets over them.
 export from text.LineMap import *

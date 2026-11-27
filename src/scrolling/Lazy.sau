@@ -1,0 +1,559 @@
+from shine import Window
+from core.Geometry import *
+from core.Callbacks import *
+from framework.Framework import *
+from scrolling.Controller import *
+from scrolling.ScrollView import *
+
+-- ============================================================================
+-- Lists that only build what can be seen
+-- ============================================================================
+--
+-- `List` and a `VStack` in a `ScrollView` build every row they are given.
+-- For twenty rows that is nothing. For a folder of four hundred files it
+-- is four hundred rows built, measured and offered every pointer move,
+-- to show the nineteen that fit in the window; and built again, all of
+-- them, each time one is chosen.
+--
+-- The views here are told how many rows there are and how tall each is,
+-- and are given a function that builds row `i`. They build the rows the
+-- viewport shows, and a few either side so that a turn of the wheel has
+-- its rows waiting. Everything else exists only as room: the content is
+-- as tall as all the rows together, so the scroll bar and the wheel
+-- behave as if they were there.
+--
+--     LazyList(count: #files, extent: 24.0, builder: fn(i: integer) -> View
+--         return FileRow(files[i])
+--     end)
+--
+-- Every row is the same height: that is what lets a row's place be worked
+-- out without building the rows above it.
+--
+-- What a row shows is read when it is built. Scrolling builds only the
+-- rows that come into reach; the ones already there are kept as they are
+-- (`View.unchanging`). When what the rows are built from changes, build
+-- the list again, as any view: a new `LazyList` builds its rows anew.
+--
+-- All of them, unless it is told which have changed. `stamp` is a
+-- function that says, as a text, everything row `i` shows: a row whose
+-- stamp is what it was the last time is kept, and only the others are
+-- built. Choosing a file then builds two rows, the one chosen and the
+-- one that was, where it built every row in view:
+--
+--     LazyList(count: #files, extent: 24.0, builder: row, stamp: fn(i: integer) -> string
+--         return files[i].path .. "|" .. tostring(files[i].path == chosen)
+--     end)
+--
+-- A stamp that leaves out something the row shows leaves the row showing
+-- what it did. With no stamp nothing is assumed.
+
+-- What one lazy list has built, kept on its element between builds.
+class LazyBuilt
+	-- The view the cells were built for. Cells made for another are not
+	-- reused: a new list has new things to show.
+	maker: View?
+
+	-- The cells built, by the number of what they show, and the range of
+	-- those numbers.
+	cells: table<integer, View>
+	first: integer
+	last: integer
+
+	-- What each of them was stamped when it was built, when the list has
+	-- stamps.
+	stamps: table<integer, string>
+
+	-- How many there were to a row when they were built.
+	columns: integer
+
+	-- The cell last brought into view because the list asked (`reveal`).
+	revealed: integer
+
+	fn init()
+		self.maker = nil
+		self.cells = {}
+		self.stamps = {}
+		self.first = 1
+		self.last = 0
+		self.columns = 1
+		self.revealed = 0
+	end
+end
+
+-- One built row or tile. It is made once and handed back, the same
+-- object, until the list is built anew, and says so (`View.unchanging`):
+-- that is what keeps a row already on the screen from being built again
+-- when scrolling adds another.
+export class LazyCell extends SingleChildView
+	fn init(child: View, key: string)
+		self.super(child, key)
+	end
+
+	fn unchanging() -> boolean
+		return true
+	end
+end
+
+-- The cells in reach, each at the place its number gives it, in a box
+-- the size of all of them.
+export class LazyStrip extends View
+	children: table<View>
+
+	-- The number of the first cell here, how many there are in all, and
+	-- how many to a row.
+	first: integer
+	count: integer
+	columns: integer
+
+	-- A cell's width (0: the whole width, one to a row) and height, and
+	-- the gaps between them.
+	cellWidth: float
+	cellHeight: float
+	spacing: float
+	runSpacing: float
+	insets: EdgeInsets
+
+	fn init(
+		children: table<View>,
+		first: integer,
+		count: integer,
+		columns: integer,
+		cellWidth: float,
+		cellHeight: float,
+		spacing: float,
+		runSpacing: float,
+		insets: EdgeInsets,
+		key: string? = nil
+	)
+		self.super(key)
+
+		self.children = claimedAll(children)
+		self.first = first
+		self.count = count
+		self.columns = columns
+		self.cellWidth = cellWidth
+		self.cellHeight = cellHeight
+		self.spacing = spacing
+		self.runSpacing = runSpacing
+		self.insets = insets
+	end
+
+	fn childViews() -> table<View>
+		return self.children
+	end
+
+	fn layout(el: Element, constraints: Constraints) -> Size
+		local width: float = constraints.maxWidth
+
+		if not constraints.hasBoundedWidth() then
+			width = constraints.minWidth
+		end
+
+		local insets: EdgeInsets = self.insets
+		local cell: float = self.cellWidth
+
+		if cell <= 0.0 then
+			cell = atLeastZero(width - insets.horizontal())
+		end
+
+		local pitch: float = self.cellHeight + self.runSpacing
+		local tight: Constraints = Constraints.tight(Size(cell, self.cellHeight))
+		local i: integer = 1
+
+		while i <= el.childCount() do
+			local child: Element? = el.childAt(i)
+
+			if child != nil then
+				local at: integer = self.first + i - 2
+				local row: integer = at / self.columns
+				local column: integer = at % self.columns
+
+				child!.layout(tight)
+				child!.offset = Offset(
+					insets.left + (column as float) * (cell + self.spacing),
+					insets.top + (row as float) * pitch
+				)
+			end
+
+			i = i + 1
+		end
+
+		local rows: integer = (self.count + self.columns - 1) / self.columns
+		local height: float = insets.vertical()
+
+		if rows > 0 then
+			height = height + (rows as float) * pitch - self.runSpacing
+		end
+
+		return Size(width, height)
+	end
+end
+
+-- What sits in the viewport: it works out which cells are in reach,
+-- builds those, and builds again when scrolling or a new width brings
+-- others into reach.
+export class LazyBody extends View
+	count: integer
+	builder: fn(integer) -> View
+	stamp: (fn(integer) -> string)?
+	reveal: integer
+	controller: ScrollController
+	cellWidth: float
+	cellHeight: float
+	spacing: float
+	runSpacing: float
+	insets: EdgeInsets
+
+	-- Rows kept built beyond each end of what shows.
+	static reach: integer = 4
+
+	fn init(
+		count: integer,
+		builder: fn(integer) -> View,
+		stamp: (fn(integer) -> string)?,
+		reveal: integer,
+		controller: ScrollController,
+		cellWidth: float,
+		cellHeight: float,
+		spacing: float,
+		runSpacing: float,
+		insets: EdgeInsets,
+		key: string? = nil
+	)
+		self.super(key)
+
+		self.count = count
+		self.builder = builder
+		self.stamp = stamp
+		self.reveal = reveal
+		self.controller = controller
+		self.cellWidth = cellWidth
+		self.cellHeight = cellHeight
+		self.spacing = spacing
+		self.runSpacing = runSpacing
+		self.insets = insets
+	end
+
+	-- It has a tick to run: see `View.ticks`.
+	fn ticks() -> boolean
+		return true
+	end
+
+	-- The viewport's size: what it was last laid out at, or, before it has
+	-- been, the window's, which is never less.
+	local fn room() -> Size
+		local viewport: Element? = self.controller.viewport
+
+		if viewport != nil and viewport!.size.height > 0.0 then
+			return viewport!.size
+		end
+
+		local width: integer, height: integer = Window.getSize()
+
+		return Size(Display.toLogical(width as float), Display.toLogical(height as float))
+	end
+
+	-- How many cells there are to a row in a viewport `width` wide.
+	local fn columnsIn(width: float) -> integer
+		if self.cellWidth <= 0.0 then
+			return 1
+		end
+
+		local inner: float = width - self.insets.horizontal() + self.spacing
+		local fit: integer = Math.floor(inner / (self.cellWidth + self.spacing))
+
+		if fit < 1 then
+			return 1
+		end
+
+		return fit
+	end
+
+	-- The rows that show, from 0: the first and the last.
+	local fn rowsShown(columns: integer, height: float) -> (integer, integer)
+		local pitch: float = self.cellHeight + self.runSpacing
+		local rows: integer = (self.count + columns - 1) / columns
+		local top: float = self.controller.offset - self.insets.top
+		local first: integer = Math.floor(top / pitch)
+		local last: integer = Math.floor((top + height) / pitch)
+
+		if first < 0 then
+			first = 0
+		end
+
+		if last > rows - 1 then
+			last = rows - 1
+		end
+
+		return first, last
+	end
+
+	local fn built(data: ElementData) -> LazyBuilt
+		local existing: LazyBuilt? = data.scratch.lazy as LazyBuilt
+
+		if existing != nil then
+			return existing!
+		end
+
+		local made: LazyBuilt = LazyBuilt()
+		data.scratch.lazy = made
+
+		return made
+	end
+
+	-- Scrolling moves the offset without building anything
+	-- (`ScrollController.shift`), and a window made wider changes how many
+	-- fit in a row. Either can bring into view cells that are not built:
+	-- that, and only that, builds again.
+	fn tick(el: Element, dt: float) -> nil
+		local built: LazyBuilt = self.built(el.data)
+		local room: Size = self.room()
+		local columns: integer = self.columnsIn(room.width)
+
+		if columns != built.columns then
+			el.markNeedsBuild()
+
+			return
+		end
+
+		local first: integer, last: integer = self.rowsShown(columns, room.height)
+		local start: integer = first * columns + 1
+		local stop: integer = lower((last + 1) * columns, self.count)
+
+		if start < built.first or stop > built.last then
+			el.markNeedsBuild()
+		end
+	end
+
+	-- Scroll, if it takes scrolling, so that cell `index` is in view: by
+	-- as little as does it, as a list does when the arrow keys carry
+	-- what is chosen past its edge.
+	local fn bringIntoView(index: integer, columns: integer, height: float) -> nil
+		local pitch: float = self.cellHeight + self.runSpacing
+		local row: integer = (index - 1) / columns
+		local top: float = self.insets.top + (row as float) * pitch
+		local bottom: float = top + self.cellHeight
+		local offset: float = self.controller.offset
+
+		if top < offset then
+			self.controller.jumpTo(atLeastZero(top - self.insets.top))
+		elseif bottom > offset + height then
+			self.controller.jumpTo(bottom + self.insets.bottom - height)
+		end
+	end
+
+	fn body(context: BuildContext) -> View
+		local built: LazyBuilt = self.built(context.data())
+		local room: Size = self.room()
+		local columns: integer = self.columnsIn(room.width)
+
+		-- Once for each cell asked for, and not again while it stays the
+		-- one: the wheel may carry it out of view afterwards.
+		if self.reveal != built.revealed then
+			built.revealed = self.reveal
+
+			if self.reveal >= 1 and self.reveal <= self.count then
+				self.bringIntoView(self.reveal, columns, room.height)
+			end
+		end
+
+		local first: integer, last: integer = self.rowsShown(columns, room.height)
+		local start: integer = higher((first - LazyBody.reach) * columns + 1, 1)
+		local stop: integer = lower((last + 1 + LazyBody.reach) * columns, self.count)
+
+		-- Cells made by this very view are what they were. A new view has
+		-- new things to show: every cell is made again, but for the ones
+		-- its stamps say are as they were.
+		local same: boolean = built.maker == self
+		local stamp: (fn(integer) -> string)? = self.stamp
+		local cells: table<integer, View> = {}
+		local stamps: table<integer, string> = {}
+		local children: table<View> = {}
+		local make: fn(integer) -> View = self.builder
+		local i: integer = start
+
+		while i <= stop do
+			local cell: View? = built.cells[i]
+			local said: string? = nil
+
+			if stamp != nil then
+				said = stamp!(i)
+			end
+
+			if cell != nil and not same and (said == nil or said != built.stamps[i]) then
+				cell = nil
+			end
+
+			if cell == nil then
+				local shown: View = make(i)
+
+				cell = LazyCell(shown, shown.key ?? ("cell#" .. i))
+			end
+
+			cells[i] = cell!
+			children[#children + 1] = cell!
+
+			if said != nil then
+				stamps[i] = said!
+			end
+
+			i = i + 1
+		end
+
+		built.maker = self
+		built.cells = cells
+		built.stamps = stamps
+		built.first = start
+		built.last = stop
+		built.columns = columns
+
+		return LazyStrip(
+			children,
+			start,
+			self.count,
+			columns,
+			self.cellWidth,
+			self.cellHeight,
+			self.spacing,
+			self.runSpacing,
+			self.insets
+		)
+	end
+end
+
+-- A scrolling list of `count` rows, each `extent` high, of which only
+-- the ones in view are built: `builder(i)` makes row `i`, from 1.
+--
+-- A row whose view has a key keeps its element (its hover, a field being
+-- typed in) by that key; give rows the key of what they show when the
+-- order can change. `spacing` is the gap between one row and the next,
+-- `padding` the room round all of them together. `reveal` is the number
+-- of a row to scroll into view when it changes: the one the arrow keys
+-- have just chosen, which may be one not on the screen and so not built.
+export class LazyList extends View
+	count: integer
+	extent: float
+	builder: fn(integer) -> View
+	stamp: (fn(integer) -> string)?
+	reveal: integer
+	spacing: float
+	padding: EdgeInsets?
+	controller: ScrollController?
+	step: float
+	showBar: boolean
+
+	fn init(
+		count: integer,
+		extent: float,
+		builder: fn(integer) -> View,
+		stamp: (fn(integer) -> string)? = nil,
+		reveal: integer = 0,
+		spacing: float = 0.0,
+		padding: EdgeInsets? = nil,
+		controller: ScrollController? = nil,
+		step: float = 48.0,
+		showBar: boolean = true,
+		key: string? = nil
+	)
+		self.super(key)
+
+		self.count = count
+		self.extent = extent
+		self.builder = builder
+		self.stamp = stamp
+		self.reveal = reveal
+		self.spacing = spacing
+		self.padding = padding
+		self.controller = controller
+		self.step = step
+		self.showBar = showBar
+	end
+
+	fn body(context: BuildContext) -> View
+		-- One controller for the scroll view and for the rows, which have
+		-- to know where it is scrolled to: the one given, or this
+		-- element's own.
+		local controller: ScrollController = self.controller ?? controllerFor(context.data())
+		local rows: View = LazyBody(
+			self.count,
+			self.builder,
+			self.stamp,
+			self.reveal,
+			controller,
+			0.0,
+			self.extent,
+			0.0,
+			self.spacing,
+			self.padding ?? EdgeInsets.zero()
+		)
+
+		return ScrollView(child: rows, controller: controller, step: self.step, showBar: self.showBar)
+	end
+end
+
+-- The same for tiles: `count` cells, each `cellWidth` by `cellHeight`,
+-- as many to a row as the width holds, `spacing` between them and
+-- `runSpacing` between the rows.
+export class LazyGrid extends View
+	count: integer
+	cellWidth: float
+	cellHeight: float
+	builder: fn(integer) -> View
+	stamp: (fn(integer) -> string)?
+	reveal: integer
+	spacing: float
+	runSpacing: float
+	padding: EdgeInsets?
+	controller: ScrollController?
+	step: float
+	showBar: boolean
+
+	fn init(
+		count: integer,
+		cellWidth: float,
+		cellHeight: float,
+		builder: fn(integer) -> View,
+		stamp: (fn(integer) -> string)? = nil,
+		reveal: integer = 0,
+		spacing: float = 0.0,
+		runSpacing: float = 0.0,
+		padding: EdgeInsets? = nil,
+		controller: ScrollController? = nil,
+		step: float = 48.0,
+		showBar: boolean = true,
+		key: string? = nil
+	)
+		self.super(key)
+
+		self.count = count
+		self.cellWidth = cellWidth
+		self.cellHeight = cellHeight
+		self.builder = builder
+		self.stamp = stamp
+		self.reveal = reveal
+		self.spacing = spacing
+		self.runSpacing = runSpacing
+		self.padding = padding
+		self.controller = controller
+		self.step = step
+		self.showBar = showBar
+	end
+
+	fn body(context: BuildContext) -> View
+		local controller: ScrollController = self.controller ?? controllerFor(context.data())
+		local cells: View = LazyBody(
+			self.count,
+			self.builder,
+			self.stamp,
+			self.reveal,
+			controller,
+			self.cellWidth,
+			self.cellHeight,
+			self.spacing,
+			self.runSpacing,
+			self.padding ?? EdgeInsets.zero()
+		)
+
+		return ScrollView(child: cells, controller: controller, step: self.step, showBar: self.showBar)
+	end
+end

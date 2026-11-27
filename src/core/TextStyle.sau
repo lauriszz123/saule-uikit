@@ -33,9 +33,10 @@ local fn isWordChar(ch: string) -> boolean
 end
 
 -- A word in the pieces a line may break between: after each hyphen inside
--- it, as "well-" "known", or a kernel's "6.18.58-" "microsoft-" "standard".
+-- it, as "well-" "known", or a kernel's "6.18.58-" "microsoft-" "standard",
+-- and after each underscore, as a file's "drm_" "display_" "helper".
 -- Only between letters or digits, so "-5" keeps its sign and "--" stays
--- whole. A word without such a hyphen is one piece.
+-- whole. A word without such a mark is one piece.
 export fn hyphenPieces(word: string) -> table<string>
 	local out: table<string> = {}
 	local length: integer = String.len(word)
@@ -45,7 +46,9 @@ export fn hyphenPieces(word: string) -> table<string>
 		local before: string = String.sub(word, i - 1, i - 1)
 		local after: string = String.sub(word, i + 1, i + 1)
 
-		if String.sub(word, i, i) == "-" and isWordChar(before) and isWordChar(after) then
+		local mark: string = String.sub(word, i, i)
+
+		if (mark == "-" or mark == "_") and isWordChar(before) and isWordChar(after) then
 			out[#out + 1] = String.sub(word, start, i)
 			start = i + 1
 		end
@@ -285,7 +288,11 @@ export class TextStyle
 						out[#out + 1] = line
 					end
 
-					line = piece
+					-- A piece too long for a line of its own is cut short, with
+					-- an ellipsis: left whole, it ran on past the edge and
+					-- over whatever was beside it, and broken where the line
+					-- ends it read as "Appeara" "nce".
+					line = self.truncated(piece, maxWidth)
 				end
 
 				joint = ""
@@ -295,6 +302,42 @@ export class TextStyle
 		if #line > 0 then
 			out[#out + 1] = line
 		end
+	end
+
+	-- How many characters of `text`, from its start, fit in `maxWidth`: one
+	-- at least, so that cutting by it always gets somewhere. Found by
+	-- halving, a measurement for each halving and not for each character.
+	fn fitting(text: string, maxWidth: float) -> integer
+		local low: integer = 1
+		local high: integer = String.len(text)
+
+		while low < high do
+			local middle: integer = (low + high + 1) / 2
+
+			if self.measure(String.sub(text, 1, middle)).width <= maxWidth then
+				low = middle
+			else
+				high = middle - 1
+			end
+		end
+
+		return low
+	end
+
+	-- `text` cut short to fit `maxWidth`, with an ellipsis for what was
+	-- left out; `text` itself when it fits.
+	fn truncated(text: string, maxWidth: float) -> string
+		if self.measure(text).width <= maxWidth then
+			return text
+		end
+
+		local room: float = maxWidth - self.measure("…").width
+
+		if room <= 0.0 then
+			return ""
+		end
+
+		return String.sub(text, 1, self.fitting(text, room)) .. "…"
 	end
 
 	-- Where each visual line *starts*, as a 1-based index into `text`.

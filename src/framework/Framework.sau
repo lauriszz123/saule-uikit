@@ -602,6 +602,20 @@ export class View
 		return false
 	end
 
+	-- Whether being handed to its element a second time, the same object,
+	-- means nothing has changed beneath it.
+	--
+	-- False by default, and for good reason: a view is rebuilt because
+	-- something *outside* it changed — a model its `body` reads — and the
+	-- same object would then describe a different picture. True only from
+	-- a view whose maker keeps it for exactly as long as what it shows
+	-- stands: the cells of a `LazyList`, which are made once and handed
+	-- back, the same objects, each time scrolling brings a few more rows
+	-- into the list. Rebuilding every row for those few was the cost.
+	fn unchanging() -> boolean
+		return false
+	end
+
 	-- --- focus and keyboard --------------------------------------------------
 
 	-- Non-nil makes this view focusable. Key events go to the focused
@@ -1666,6 +1680,13 @@ export class Element
 	-- Adopt a new configuration of the same view class.
 	fn update(newWidget: View) -> nil
 		local old: View = self.view
+
+		-- The very view this element already has, and one that says it is
+		-- the whole of what it shows (`View.unchanging`): there is nothing
+		-- new to adopt and nothing below to build again.
+		if newWidget == old and newWidget.unchanging() then
+			return
+		end
 		self.view = newWidget
 
 		local s: State? = self.state
@@ -1831,11 +1852,24 @@ export class Element
 			i = i + 1
 		end
 
+		-- Where each keyed old element is, by its key: made the first time
+		-- a keyed view is not found where it was, which a list that only
+		-- changed what its rows say never needs.
+		local byKey: table<string, integer>? = nil
+
 		i = 1
 
 		while i <= #news do
 			local view: View = news[i]
-			local slot: integer = Element.claimSlot(pool, #olds, view, i)
+			local slot: integer = Element.claimSlot(pool, view, i)
+
+			if slot == 0 and view.key != nil then
+				if byKey == nil then
+					byKey = Element.keyed(olds)
+				end
+
+				slot = Element.claimKeyed(pool, byKey!, #olds, view)
+			end
 			local reused: Element? = nil
 
 			if slot > 0 then
@@ -1875,35 +1909,79 @@ export class Element
 		return out
 	end
 
-	-- Which pool slot `view` should reuse, or 0 for "none — build fresh".
+	-- Which pool slot `view` should reuse where it stands, or 0.
 	--
-	-- Keyed views search the whole pool; unkeyed ones only consider the slot
-	-- they sit in, and only if that slot's old view is unkeyed too. Without
-	-- that second condition an unkeyed view could steal a keyed element and
+	-- A view is first looked for in the slot it sits in: a list rebuilt
+	-- with the same rows in the same order finds every one of them there,
+	-- keyed or not. An unkeyed view is looked for nowhere else, and only
+	-- takes that slot if its old view is unkeyed too (`canUpdate` compares
+	-- the keys): otherwise an unkeyed view could steal a keyed element and
 	-- undo the reordering the key exists to express.
-	-- `count` is passed explicitly because clearing a claimed slot leaves a nil
-	-- hole, and `#` over a table with holes is not something to lean on.
-	static local fn claimSlot(pool: table<Element?>, count: integer, view: View, index: integer) -> integer
-		if view.key != nil then
-			local i: integer = 1
-
-			while i <= count do
-				local candidate: Element? = pool[i]
-
-				if candidate != nil and Element.canUpdate(candidate!.view, view) then
-					return i
-				end
-
-				i = i + 1
-			end
-
-			return 0
-		end
-
+	static local fn claimSlot(pool: table<Element?>, view: View, index: integer) -> integer
 		local atIndex: Element? = pool[index]
 
 		if atIndex != nil and Element.canUpdate(atIndex!.view, view) then
 			return index
+		end
+
+		return 0
+	end
+
+	-- The slot of each keyed element in `olds`, by key. Two with one key
+	-- keep the first, and `claimKeyed` goes looking for the other.
+	static local fn keyed(olds: table<Element>) -> table<string, integer>
+		local out: table<string, integer> = {}
+		local i: integer = #olds
+
+		while i >= 1 do
+			local key: string? = olds[i].view.key
+
+			if key != nil then
+				out[key!] = i
+			end
+
+			i = i - 1
+		end
+
+		return out
+	end
+
+	-- A keyed view that was not where it sat: the slot its key was in, if
+	-- that element is still unclaimed and of its class; else whichever
+	-- unclaimed one is, by looking at them all. The looking used to be the
+	-- only way, for every keyed view, which made a list of `n` rows `n`
+	-- times `n` comparisons to rebuild.
+	static local fn claimKeyed(
+		pool: table<Element?>,
+		byKey: table<string, integer>,
+		count: integer,
+		view: View
+	) -> integer
+		local at: integer? = byKey[view.key!]
+
+		if at == nil then
+			return 0
+		end
+
+		local found: Element? = pool[at!]
+
+		if found != nil and Element.canUpdate(found!.view, view) then
+			return at!
+		end
+
+		-- `count` is passed explicitly because clearing a claimed slot
+		-- leaves a nil hole, and `#` over a table with holes is not
+		-- something to lean on.
+		local i: integer = 1
+
+		while i <= count do
+			local candidate: Element? = pool[i]
+
+			if candidate != nil and Element.canUpdate(candidate!.view, view) then
+				return i
+			end
+
+			i = i + 1
 		end
 
 		return 0
@@ -1964,7 +2042,22 @@ export class Element
 	-- `x` / `y` are the *parent's* absolute origin; this element's own origin
 	-- adds its offset on top.
 	fn paint(x: float, y: float) -> nil
-		self.view.paint(self, x + self.offset.dx, y + self.offset.dy)
+		local ax: float = x + self.offset.dx
+		local ay: float = y + self.offset.dy
+
+		-- Out of sight of the viewport being painted: nothing to draw, here
+		-- or below. See `PaintClip`.
+		if PaintClip.active then
+			if ax >= PaintClip.right or ay >= PaintClip.bottom then
+				return
+			end
+
+			if ax + self.size.width <= PaintClip.left or ay + self.size.height <= PaintClip.top then
+				return
+			end
+		end
+
+		self.view.paint(self, ax, ay)
 	end
 
 	fn paintChildren(x: float, y: float) -> nil

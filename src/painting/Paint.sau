@@ -299,6 +299,23 @@ export class Text extends View
 
 			capped[limit!] = capped[limit!] .. "…"
 			out = capped
+
+			-- With its ellipsis the last line may be longer than the box.
+			if maxWidth < Math.huge then
+				out[limit!] = style.truncated(out[limit!], maxWidth)
+			end
+		end
+
+		-- Text that is not wrapped has nothing keeping it to the width it
+		-- was given: what does not fit is left out, with an ellipsis, and
+		-- not drawn on over whatever is beside it.
+		if not self.softWrap and maxWidth < Math.huge then
+			local i: integer = 1
+
+			while i <= #out do
+				out[i] = style.truncated(out[i], maxWidth)
+				i = i + 1
+			end
 		end
 
 		el.data.scratch.textKey = signature

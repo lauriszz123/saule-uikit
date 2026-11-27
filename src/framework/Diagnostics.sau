@@ -85,6 +85,38 @@ export class Repaint
 		end
 	end
 
+	-- `longest`, or the time left until the clock reaches what `requestAt`
+	-- was given, whichever is less: how long the frame loop may wait
+	-- without being late for it.
+	static fn within(longest: float) -> float
+		local at: float = Repaint.deadline
+
+		if Repaint.requested then
+			return 0.0
+		end
+
+		if at < 0.0 then
+			return longest
+		end
+
+		local left: float = at - Timer.getTime()
+
+		if left <= 0.0 then
+			return 0.0
+		end
+
+		-- A little past it, so that the clock has reached it when the
+		-- wait is over: woken a moment early, the loop would find nothing
+		-- due and wait again, for the moment that was left.
+		left = left + 0.002
+
+		if left < longest then
+			return left
+		end
+
+		return longest
+	end
+
 	-- Consume whatever is due; the frame loop calls this once per frame.
 	static fn take() -> boolean
 		local wanted: boolean = Repaint.requested
@@ -98,6 +130,74 @@ export class Repaint
 		end
 
 		return wanted
+	end
+end
+
+-- The part of the window anything painted now can show in, when something
+-- above is clipping to less than all of it: a scroll view's viewport.
+--
+-- A viewport clips what it draws, but clipping is the last thing that
+-- happens to a shape: by then the list's two hundred rows have each set
+-- their font and colour and asked for their text to be drawn, to have
+-- nineteen in twenty thrown away. `Element.paint` asks here first, and a
+-- subtree that lies outside is not painted at all.
+--
+-- The box kept is wider than the clip by `margin` on every side, for what
+-- draws a little outside its own box: a shadow, a focus ring.
+export class PaintClip
+	static active: boolean = false
+	static left: float = 0.0
+	static top: float = 0.0
+	static right: float = 0.0
+	static bottom: float = 0.0
+
+	static margin: float = 48.0
+
+	-- Nothing is clipping: the start of a frame.
+	static fn reset() -> nil
+		PaintClip.active = false
+	end
+
+	-- Narrow to the box at `x`, `y` (inside whatever is already clipping).
+	-- The caller keeps the five fields and puts them back when it is done.
+	static fn narrow(x: float, y: float, width: float, height: float) -> nil
+		local m: float = PaintClip.margin
+		local l: float = x - m
+		local t: float = y - m
+		local r: float = x + width + m
+		local b: float = y + height + m
+
+		if PaintClip.active then
+			if PaintClip.left > l then
+				l = PaintClip.left
+			end
+
+			if PaintClip.top > t then
+				t = PaintClip.top
+			end
+
+			if PaintClip.right < r then
+				r = PaintClip.right
+			end
+
+			if PaintClip.bottom < b then
+				b = PaintClip.bottom
+			end
+		end
+
+		PaintClip.active = true
+		PaintClip.left = l
+		PaintClip.top = t
+		PaintClip.right = r
+		PaintClip.bottom = b
+	end
+
+	static fn restore(active: boolean, left: float, top: float, right: float, bottom: float) -> nil
+		PaintClip.active = active
+		PaintClip.left = left
+		PaintClip.top = top
+		PaintClip.right = right
+		PaintClip.bottom = bottom
 	end
 end
 

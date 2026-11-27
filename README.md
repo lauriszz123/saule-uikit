@@ -767,6 +767,11 @@ line unless you give it a width. Wrapping costs one measurement per word, so the
 result is cached on the element and recomputed only when the text or width
 changes.
 
+A `Text` keeps to the width it is given. A word too long for a line is cut
+short with an ellipsis, as is a line that is not wrapped, and a word may break
+after a hyphen or an underscore inside it (`drm_` `display_` `helper`), so a
+file's long name takes a second line and does not run over what is beside it.
+
 `Button` is keyboard-operable for free: Tab focuses it, `Enter` or `Space`
 presses it, and it draws a focus ring while focused. A disabled button is not
 focusable, so it drops out of the Tab order.
@@ -838,6 +843,24 @@ Key names are the engine's: `"ctrl"` is Ctrl, `"alt"` Alt, `"shift"` Shift,
 `"escape"` Esc, `"return"` Enter, and anything else is capitalised (`"q"` is Q,
 `"f5"` F5). `"super"`, the logo key, is drawn as Saule's sun, and the arrow keys
 as arrows (`KeyCap`), so no font needs those symbols.
+
+## Doing nothing
+
+After a few frames in which nothing arrived, nothing was rebuilt and nothing
+was painted, `runApp` stops going round at the screen's rate. It waits for
+input (`Window.waitEvents`), which ends the wait at once, or for
+`AppLoop.idleWait` seconds (0.1), so that what only ticks still gets its turn:
+a folder looked at again, a caret's next blink (the wait never runs past a
+`Repaint.requestAt`). A window nobody is touching then costs a tenth of what
+it did, which on a slow machine with several windows open is most of the
+processor.
+
+A view that animates has to say so, as before: `markNeedsBuild`, or
+`Repaint.request()` from `paint`. A `tick` that only counts time is called
+less often while the window is idle, with the time that passed.
+
+`SAULE_IDLE_WAIT` in the environment replaces `AppLoop.idleWait`; `0` never
+waits, for telling whether a fault is the waiting's.
 
 ## Left alone
 
@@ -1058,6 +1081,44 @@ list.atEnd()            -- e.g. to trigger "load more"
 Pass one in when you need to read or drive the position; otherwise the view
 keeps its own in element scratch, where it survives rebuilds. Every child is
 built up front, so this is for tens of rows, not thousands.
+
+What lies outside a scroll view's viewport is not painted: `Element.paint`
+skips a subtree whose box is out of the viewport's sight (`PaintClip`), so a
+long page costs what shows of it to draw. It is still built and laid out.
+
+### Long lists
+
+`LazyList` and `LazyGrid` build only the rows in view, and a few either side.
+They are told how many rows there are and how high each is, and given a
+function that builds row `i`:
+
+```saule
+LazyList(#files, 24.0, fn(i: integer) -> View
+    return FileRow(files[i])
+end)
+
+LazyGrid(#files, 96.0, 104.0, tile, spacing: 6.0, runSpacing: 6.0)
+```
+
+Every row is the same height (every tile the same size): that is what lets a
+row's place be worked out without building the rows above it. A folder of
+three thousand files costs what one of twenty does.
+
+Scrolling builds the rows that come into reach and leaves the others as they
+are. A new `LazyList`, which is what a rebuild of the view around it makes,
+builds every row in view again, unless it is given a `stamp`: a function that
+says, as a text, everything row `i` shows. A row whose stamp is what it was is
+kept, so choosing a file builds the two rows that changed:
+
+```saule
+LazyList(#files, 24.0, row, stamp: fn(i: integer) -> string
+    return files[i].path .. "|" .. tostring(files[i].path == chosen)
+end, reveal: chosenAt)
+```
+
+A stamp that leaves out something the row shows leaves the row showing what it
+did. `reveal` is the number of a row to scroll into view when it changes: the
+one the arrow keys have just chosen.
 
 ### Fading a subtree
 

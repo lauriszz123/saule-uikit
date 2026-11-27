@@ -145,7 +145,21 @@ export fn runApp(
 	-- work. It starts true so the first frame always draws.
 	local needsPaint: boolean = true
 
+	-- How many frames in a row had no event, rebuilt nothing and painted
+	-- nothing. After a few of them the loop waits for input instead of
+	-- going round at the screen's rate: see the end of the frame.
+	local quiet: integer = 0
+
 	AppLoop.reset()
+
+	-- `SAULE_IDLE_WAIT`, in seconds, in place of `AppLoop.idleWait`: 0 to
+	-- have the loop go round at the screen's rate whatever happens, for
+	-- telling whether a fault is the waiting's.
+	local asked: float? = (Os.getenv("SAULE_IDLE_WAIT") ?? "") as float?
+
+	if asked != nil and asked! >= 0.0 then
+		AppLoop.idleWait = asked!
+	end
 
 	while Window.isOpen() and not AppLoop.quitting() do
 		local events: table<Event> = pollEvents()
@@ -269,12 +283,19 @@ export fn runApp(
 			needsPaint = true
 		end
 
+		if #events > 0 or needsPaint then
+			quiet = 0
+		else
+			quiet = quiet + 1
+		end
+
 		if needsPaint then
 			Graphics.clear(clear.r, clear.g, clear.b)
 
 			-- One transform turns the whole logical tree into physical pixels.
 			Graphics.push()
 			Graphics.scale(Display.scale(), Display.scale())
+			PaintClip.reset()
 			rootElement.paint(0.0, 0.0)
 			Graphics.pop()
 
@@ -284,7 +305,23 @@ export fn runApp(
 		-- Always present, even on a skipped frame: the framebuffer still holds
 		-- the last one, and this is the loop's only pacing point — without it
 		-- an idle app would spin as fast as the CPU allows.
-		Graphics.present()
+		--
+		-- A program nobody is touching has nothing to present and nothing to
+		-- find out by going round again a sixtieth of a second later, and
+		-- going round is not free: polling, ticking and checking the layout
+		-- of a window that has not changed took a fifth of a netbook's
+		-- processor, for every window left open. After a few frames of
+		-- nothing it waits instead: for input, which ends the wait at once
+		-- (`Window.waitEvents`), or for `AppLoop.idleWait`, so that whatever
+		-- only ticks (a folder looked at again, a caret's next blink) still
+		-- gets its turn.
+		local wait: float = Repaint.within(AppLoop.idleWait)
+
+		if quiet >= AppLoop.quietFrames and wait > 0.0 then
+			Window.waitEvents(wait)
+		else
+			Graphics.present()
+		end
 	end
 
 	if Window.isOpen() then
@@ -305,6 +342,14 @@ export class AppLoop
 	-- keeps it open (the app is asking about unsaved changes, and quits
 	-- itself once it has its answer). Set with `App.onCloseRequest`.
 	static closing: (fn() -> boolean)? = nil
+
+	-- How long a program nobody is touching waits between turns of its
+	-- loop, in seconds, and how many frames of nothing it takes to count as
+	-- that. Input ends the wait at once, so this is not how late a click is
+	-- seen: it is how late something that happens on its own is, a line a
+	-- command prints into a terminal that was sitting still. 0 never waits.
+	static idleWait: float = 0.1
+	static quietFrames: integer = 3
 
 	-- The window was asked to close.
 	static fn closeRequested() -> nil
